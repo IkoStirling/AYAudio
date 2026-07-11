@@ -12,6 +12,7 @@ add_executable(${TEST_TARGET}
     Test_AudioSpatializer.cpp
     Test_AudioMixer.cpp
     Test_AudioEngine.cpp
+    Test_MiniaudioBackend.cpp
 )
 
 target_link_libraries(${TEST_TARGET} PRIVATE
@@ -22,6 +23,10 @@ target_link_libraries(${TEST_TARGET} PRIVATE
 
 target_include_directories(${TEST_TARGET} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backend
+    # vcpkg miniaudio header (needed by tests that include MiniaudioBackend.h
+    # which forward-declares ma_device).
+    ${MINIAUDIO_INCLUDE_DIRS}
 )
 
 target_compile_definitions(${TEST_TARGET} PRIVATE

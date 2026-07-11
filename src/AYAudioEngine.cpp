@@ -1,6 +1,7 @@
 #include <AYAudioEngine.h>
 
 #include <AYAudioSpatializer.h>
+#include "MiniaudioBackend.h"
 
 #include <algorithm>
 #include <cassert>
@@ -161,6 +162,12 @@ bool AudioEngine::initialize(const AudioSettings& settings) {
         if (!_backend->start(_backendInfo)) {
             _backend.reset();
             return false;
+        }
+        // Real-device backends (currently MiniaudioBackend) pull output from
+        // the engine inside their own data callback. Hook them up after the
+        // backend is started so the engine state is fully initialized.
+        if (auto* ma = dynamic_cast<MiniaudioBackend*>(_backend.get())) {
+            ma->attachEngine(this);
         }
     }
 

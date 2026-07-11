@@ -14,11 +14,18 @@ set(SRC_FILES
     src/AYAudioSubSystem.cpp
 )
 
-# Backends (Null + Mock ship in v0; MiniaudioBackend is a stub until v0.5)
+# Backends. Null + Mock are CPU-only; MiniaudioBackend talks to the
+# default OS audio device via miniaudio (header-only vcpkg port).
 set(BACKEND_FILES
     backend/NullBackend.cpp
     backend/MockBackend.cpp
     backend/MiniaudioBackend.cpp
+)
+
+# Backend-internal headers (kept under backend/ so they don't leak out of
+# the module's public include path).
+set(BACKEND_HEADERS
+    backend/MiniaudioBackend.h
 )
 
 # Public headers (one-level above src/)
@@ -36,7 +43,29 @@ set(HEAD_FILES
     interface/IAudioBackend.h
 )
 
-add_library(${MODULE_NAME} STATIC ${SRC_FILES} ${BACKEND_FILES} ${HEAD_FILES})
+# Locate miniaudio.h. Prefer system paths (vcpkg install layout, etc.) via
+# find_path; if nothing is found, fall back to the in-tree vcpkg layout we use
+# in this workspace so the build keeps working on machines without vcpkg on
+# PATH. miniaudio is a header-only C library — no link target is needed, but
+# the TU that #includes it must #define MINIAUDIO_IMPLEMENTATION exactly once.
+find_path(MINIAUDIO_INCLUDE_DIRS "miniaudio.h")
+if(NOT MINIAUDIO_INCLUDE_DIRS)
+    if(DEFINED ENV{VCPKG_ROOT})
+        set(_ay_vcpkg_inc "$ENV{VCPKG_ROOT}/installed/x64-windows/include")
+    elseif(EXISTS "${CMAKE_SOURCE_DIR}/vcpkg/installed/x64-windows/include")
+        set(_ay_vcpkg_inc "${CMAKE_SOURCE_DIR}/vcpkg/installed/x64-windows/include")
+    endif()
+    if(_ay_vcpkg_inc AND EXISTS "${_ay_vcpkg_inc}/miniaudio.h")
+        set(MINIAUDIO_INCLUDE_DIRS "${_ay_vcpkg_inc}")
+        message(STATUS "AYAudio: using bundled vcpkg miniaudio at ${MINIAUDIO_INCLUDE_DIRS}")
+    else()
+        message(FATAL_ERROR
+            "AYAudio: miniaudio.h not found. Install via vcpkg "
+            "(`vcpkg install miniaudio:x64-windows`) or set VCPKG_ROOT.")
+    endif()
+endif()
+
+add_library(${MODULE_NAME} STATIC ${SRC_FILES} ${BACKEND_FILES} ${BACKEND_HEADERS} ${HEAD_FILES})
 
 target_include_directories(${MODULE_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -47,6 +76,7 @@ target_include_directories(${MODULE_NAME} PUBLIC
 target_include_directories(${MODULE_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/backend
+    ${MINIAUDIO_INCLUDE_DIRS}
 )
 
 target_link_libraries(${MODULE_NAME} PUBLIC
@@ -54,6 +84,12 @@ target_link_libraries(${MODULE_NAME} PUBLIC
     AYMath
     AYGameLoop
 )
+
+# Windows native deps for miniaudio (WASAPI / WinMM). Link system libs
+# unconditionally so the produced AYAudio.lib is self-contained on Windows.
+if(WIN32)
+    target_link_libraries(${MODULE_NAME} PRIVATE winmm ole32 user32)
+endif()
 
 # C++ standard
 target_compile_features(${MODULE_NAME} PRIVATE cxx_std_20)
