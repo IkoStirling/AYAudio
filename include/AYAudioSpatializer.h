@@ -5,13 +5,16 @@
 // voice. Returned values are applied by the mixer when summing into the
 // output buffer.
 //
-// v0 implements:
+// v1 implements:
 //   - Mode::Disabled   → pure stereoPan with equal-power law
-//   - Mode::World      → distance attenuation + stereo pan from azimuth
+//   - Mode::World      → distance + cone + occlusion/obstruction gain
+//                          + stereo pan from azimuth
+//   - Mode::Relative   → same as World but position is interpreted as an
+//                          offset from listener (UI attach)
 //
 // Attenuation models: Inverse / Linear / InverseClamped.
-// Cone gain, occlusion low-pass, and air absorption are wired up in v1
-// (see design §5.3); parameters are accepted now to keep call sites stable.
+// Cone gain and occlusion/obstruction gain are wired up in v1.
+// Low-pass filtering (occlusion cutoff, air absorption) is v2.
 
 #include <AYCore.h>
 #include <AYAudioTypes.h>
@@ -43,6 +46,20 @@ public:
     // Distance attenuation in linear gain ∈ [minGain, maxGain].
     // distance is in the same units as refDist/maxDist (typically meters).
     static float distanceGain(const SpatializationParams& voice, float distance);
+
+    // Cone attenuation gain ∈ [outerConeGain, 1.0] based on the angle between
+    // the listener-relative direction and `voice.forward`. An inner angle of
+    // 360° (default) is omnidirectional and returns 1.0 regardless of angle.
+    // static暴露用于测试 + 让编辑器和调试工具单独查询 cone gain。
+    static float coneGain(const ListenerParams& listener,
+                          const SpatializationParams& voice);
+
+    // Occlusion / obstruction gain multiplier ∈ [0, 1]. Combines the two
+    // sources multiplicatively: clear + clear ⇒ 1.0; fully occluded ⇒ 0.
+    //   gain = (1 - occlusion) * (1 - obstruction * 0.5)
+    // Obstruction is treated as a softer attenuation than occlusion. Both
+    // inputs are clamped to [0, 1].
+    static float occlusionGain(const SpatializationParams& voice);
 
     // Compute azimuth (radians) of `voice.position` relative to listener
     // forward axis (in listener-local frame). Returns 0 when the source is

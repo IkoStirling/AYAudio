@@ -1,6 +1,8 @@
 #include <AYAudio.h>
 #include "AYTest.h"
 
+#include <cmath>
+
 using namespace ayt::audio;
 
 namespace {
@@ -142,5 +144,158 @@ TEST_SUITE(AudioSpatializerTests)
             ayt::math::FVector3{ 3.0f, 0.0f, 0.0f });
         // raw = 3.0, scaled = 6.0
         CHECK_FLOAT_EQ(d, 6.0f, kEps);
-    }    
+    }
+
+    // ===== coneGain =====
+
+    TEST_CASE(ConeGainOmnidirectionalAlwaysFull) {
+        // innerConeAngleDeg defaults to 360 ⇒ no cone attenuation.
+        ListenerParams l = defaultListener();
+        SpatializationParams v = defaultVoice();
+        v.innerConeAngleDeg = 360.0f;
+        v.outerConeAngleDeg = 360.0f;
+        v.outerConeGain = 0.0f;
+        // Source directly behind listener: still full gain when omnidirectional.
+        v.position = ayt::math::FVector3{ 0.0f, 0.0f, 100.0f };
+        v.forward = ayt::math::FVector3{ 0.0f, 0.0f, -1.0f };
+        CHECK_FLOAT_EQ(AudioSpatializer::coneGain(l, v), 1.0f, kEps);
+    }
+
+    TEST_CASE(ConeGainInsideInnerConeIsOne) {
+        // Source lies on the cone's axis (in front of listener when
+        // forward == (0,0,-1)): angle ≈ 0 ⇒ inside inner cone.
+        ListenerParams l = defaultListener();
+        SpatializationParams v = defaultVoice();
+        v.innerConeAngleDeg = 60.0f;
+        v.outerConeAngleDeg = 120.0f;
+        v.outerConeGain = 0.2f;
+        v.position = ayt::math::FVector3{ 0.0f, 0.0f, -10.0f };
+        v.forward = ayt::math::FVector3{ 0.0f, 0.0f, -1.0f };
+        CHECK_FLOAT_EQ(AudioSpatializer::coneGain(l, v), 1.0f, kEps);
+    }
+
+    TEST_CASE(ConeGainOutsideOuterConeIsOuterGain) {
+        // Source is fully to the side (90° off-axis). Outer cone is 60°, so
+        // the source sits well outside and we get outerConeGain.
+        ListenerParams l = defaultListener();
+        SpatializationParams v = defaultVoice();
+        v.innerConeAngleDeg = 30.0f;
+        v.outerConeAngleDeg = 60.0f;
+        v.outerConeGain = 0.25f;
+        v.position = ayt::math::FVector3{ 10.0f, 0.0f, 0.0f }; // 90° from forward
+        v.forward = ayt::math::FVector3{ 0.0f, 0.0f, -1.0f };
+        CHECK_FLOAT_EQ(AudioSpatializer::coneGain(l, v), 0.25f, kEps);
+    }
+
+    TEST_CASE(ConeGainInterpolatesBetweenInnerAndOuter) {
+        // Place the source exactly halfway between the inner (45°) and outer
+        // (90°) cones. Expect the gain to be halfway between 1.0 and 0.2.
+        ListenerParams l = defaultListener();
+        SpatializationParams v = defaultVoice();
+        v.innerConeAngleDeg = 45.0f;
+        v.outerConeAngleDeg = 90.0f;
+        v.outerConeGain = 0.2f;
+
+        // Place source so the angle from voice.forward is ≈ 67.5°.
+        // voice.forward = (0, 0, -1). Place source at (sin(67.5°), 0, -cos(67.5°)).
+        const float a = 67.5f * 0.017453292519943f; // deg→rad
+        v.position = ayt::math::FVector3{ std::sin(a), 0.0f, -std::cos(a) };
+        v.forward = ayt::math::FVector3{ 0.0f, 0.0f, -1.0f };
+
+        const float expected = 0.5f * 1.0f + 0.5f * 0.2f; // = 0.6
+        CHECK_FLOAT_EQ(AudioSpatializer::coneGain(l, v), expected, 1e-3f);
+    }
+
+    TEST_CASE(ConeGainDegenerateForwardIsOne) {
+        // Zero-length forward ⇒ we can't define a cone; default to full gain
+        // so we don't accidentally silence the voice.
+        ListenerParams l = defaultListener();
+        SpatializationParams v = defaultVoice();
+        v.innerConeAngleDeg = 60.0f;
+        v.outerConeAngleDeg = 120.0f;
+        v.outerConeGain = 0.0f;
+        v.position = ayt::math::FVector3{ 1.0f, 0.0f, 0.0f };
+        v.forward = ayt::math::FVector3{ 0.0f, 0.0f, 0.0f };
+        CHECK_FLOAT_EQ(AudioSpatializer::coneGain(l, v), 1.0f, kEps);
+    }
+
+    // ===== occlusionGain =====
+
+    TEST_CASE(OcclusionGainClearIsUnity) {
+        SpatializationParams v = defaultVoice();
+        v.occlusion = 0.0f;
+        v.obstruction = 0.0f;
+        CHECK_FLOAT_EQ(AudioSpatializer::occlusionGain(v), 1.0f, kEps);
+    }
+
+    TEST_CASE(OcclusionGainFullOcclusionIsZero) {
+        SpatializationParams v = defaultVoice();
+        v.occlusion = 1.0f;
+        v.obstruction = 0.0f;
+        CHECK_FLOAT_EQ(AudioSpatializer::occlusionGain(v), 0.0f, kEps);
+    }
+
+    TEST_CASE(OcclusionGainFullObstructionIsHalf) {
+        SpatializationParams v = defaultVoice();
+        v.occlusion = 0.0f;
+        v.obstruction = 1.0f;
+        // Obstruction is half-gain (0.5), occlusion is none (1.0).
+        CHECK_FLOAT_EQ(AudioSpatializer::occlusionGain(v), 0.5f, kEps);
+    }
+
+    TEST_CASE(OcclusionGainHalfOcclusion) {
+        SpatializationParams v = defaultVoice();
+        v.occlusion = 0.5f;
+        v.obstruction = 0.0f;
+        CHECK_FLOAT_EQ(AudioSpatializer::occlusionGain(v), 0.5f, kEps);
+    }
+
+    TEST_CASE(OcclusionGainCombinedMultiplies) {
+        SpatializationParams v = defaultVoice();
+        v.occlusion = 0.5f;
+        v.obstruction = 0.5f;
+        // 0.5 * (1 - 0.25) = 0.375
+        CHECK_FLOAT_EQ(AudioSpatializer::occlusionGain(v), 0.375f, kEps);
+    }
+
+    TEST_CASE(OcclusionGainClampsInputs) {
+        SpatializationParams v = defaultVoice();
+        v.occlusion = 2.0f;     // out of range
+        v.obstruction = -0.5f;  // out of range
+        CHECK_FLOAT_EQ(AudioSpatializer::occlusionGain(v), 0.0f, kEps);
+    }
+
+    // ===== compute() integration =====
+
+    TEST_CASE(ComputeWorldModeAppliesOcclusionToMono) {
+        ListenerParams l = defaultListener();
+        SpatializationParams v = defaultVoice();
+        v.mode = SpatializationParams::Mode::World;
+        v.spatialBlend = 1.0f;
+        v.position = ayt::math::FVector3{ 0.0f, 0.0f, -2.0f };
+        v.occlusion = 0.5f;
+        v.obstruction = 0.0f;
+        // monoGain reports the per-voice attenuation including occlusion.
+        // Distance attenuation at d=2 with ref=1 (InverseClamped) gives
+        // 1.0/2.0 = 0.5; then occlusion 0.5 multiplies in ⇒ 0.25.
+        SpatialGains g = AudioSpatializer::compute(l, v, 1);
+        CHECK_FLOAT_EQ(g.monoGain, 0.25f, 1e-3f);
+    }
+
+    TEST_CASE(ComputeDisabledModeIgnoresConeAndOcclusion) {
+        // Disabled mode returns the 2D pan only; cone/occlusion fields must
+        // not influence the result.
+        ListenerParams l = defaultListener();
+        SpatializationParams v = defaultVoice();
+        v.mode = SpatializationParams::Mode::Disabled;
+        v.stereoPan = 0.0f;
+        v.spatialBlend = 0.0f;
+        v.occlusion = 1.0f;       // would silence in World mode
+        v.obstruction = 1.0f;
+        v.outerConeGain = 0.0f;
+        SpatialGains g = AudioSpatializer::compute(l, v, 2);
+        // Disabled: equal-power pan, no occlusion applied.
+        CHECK_FLOAT_EQ(g.leftGain, 0.7071067f, kEps);
+        CHECK_FLOAT_EQ(g.rightGain, 0.7071067f, kEps);
+    }
 TEST_SUITE_END

@@ -66,6 +66,73 @@ float AudioSpatializer::distanceGain(const SpatializationParams& voice, float di
     return clampf(gain, voice.minGain, voice.maxGain);
 }
 
+float AudioSpatializer::coneGain(const ListenerParams& listener,
+                                 const SpatializationParams& voice) {
+    // Default inner == 360 ⇒ omnidirectional, no cone attenuation. Skipping
+    // the dot product in that case is the common path so it's worth a
+    // explicit fast-return.
+    if (voice.innerConeAngleDeg >= 360.0f) {
+        return 1.0f;
+    }
+
+    // Direction from listener toward the source. toListenerLocal already
+    // applies masterSpatialScale; that's fine for angle calculation.
+    const ayt::math::FVector3 rel = toListenerLocal(listener, voice.position);
+    const float relLen = safeSqrt(rel.x * rel.x + rel.y * rel.y + rel.z * rel.z);
+
+    // Source is co-located with the listener — no cone information; full gain.
+    if (relLen <= 0.0001f) {
+        return 1.0f;
+    }
+
+    // Use a 3D angle between the source-relative direction and the source's
+    // forward axis. For typical engine layouts forward is (0, 0, -1) and the
+    // listener sits at the origin looking down -Z; the result degrades to a
+    // 2D azimuth when the source lies in the XZ plane. We deliberately avoid
+    // folding in the listener's forward axis here — cone gain describes the
+    // source's radiation pattern, not its position relative to the listener.
+    const ayt::math::FVector3 fwd = voice.forward;
+    const float fwdLen = safeSqrt(fwd.x * fwd.x + fwd.y * fwd.y + fwd.z * fwd.z);
+    if (fwdLen <= 0.0001f) {
+        return 1.0f;
+    }
+
+    const float nx = rel.x / relLen;
+    const float ny = rel.y / relLen;
+    const float nz = rel.z / relLen;
+    const float fx = fwd.x / fwdLen;
+    const float fy = fwd.y / fwdLen;
+    const float fz = fwd.z / fwdLen;
+
+    // Dot product clamped to [-1, 1] so acos stays defined under fp error.
+    float cosAngle = clampf(nx * fx + ny * fy + nz * fz, -1.0f, 1.0f);
+    const float angleDeg = std::acos(cosAngle) * (180.0f / kPi);
+
+    // Inner cone = full gain. Outer cone = outerConeGain. Between them,
+    // linear interpolation from 1.0 down to outerConeGain.
+    if (angleDeg <= voice.innerConeAngleDeg) {
+        return 1.0f;
+    }
+    const float outerDeg = std::max(voice.outerConeAngleDeg, voice.innerConeAngleDeg);
+    if (angleDeg >= outerDeg) {
+        return clampf(voice.outerConeGain, 0.0f, 1.0f);
+    }
+    const float span = std::max(0.0001f, outerDeg - voice.innerConeAngleDeg);
+    const float t = clampf((angleDeg - voice.innerConeAngleDeg) / span, 0.0f, 1.0f);
+    const float outerGain = clampf(voice.outerConeGain, 0.0f, 1.0f);
+    return 1.0f + t * (outerGain - 1.0f);
+}
+
+float AudioSpatializer::occlusionGain(const SpatializationParams& voice) {
+    const float occ = clampf(voice.occlusion, 0.0f, 1.0f);
+    const float obs = clampf(voice.obstruction, 0.0f, 1.0f);
+    // Occlusion is the harder of the two (1.0 ⇒ silence); obstruction is
+    // softer (1.0 ⇒ half-gain). Multiplicative composition means a fully
+    // occluded voice is silent regardless of obstruction state, and a
+    // fully obstructed voice retains 0.5 with no occlusion.
+    return (1.0f - occ) * (1.0f - 0.5f * obs);
+}
+
 ayt::math::FVector3 AudioSpatializer::toListenerLocal(const ListenerParams& listener,
                                                      const ayt::math::FVector3& world) {
     // Translate into listener space (no rotation): the full rotation matrix
@@ -135,6 +202,8 @@ SpatialGains AudioSpatializer::compute(const ListenerParams& listener,
     // World / Relative — blend 3D attenuation with 2D pan.
     float distance = worldDistance(listener, ayt::math::FVector3{}, voice.position);
     float att = distanceGain(voice, distance);
+    att *= coneGain(listener, voice);
+    att *= occlusionGain(voice);
 
     // Pan from azimuth.
     float az = azimuth(listener, voice);
