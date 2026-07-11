@@ -42,6 +42,10 @@ enum class AudioSampleFormat : uint8_t {
 struct AudioClipDesc {
     uint32_t sampleRate = 48000;
     uint16_t channels = 2;          // 1=mono, 2=stereo (interleaved)
+    uint16_t bitsPerSample = 32;    // 16 (S16) or 32 (F32). Mirrors IAudio's
+                                    // bitsPerSample for debug/inspectability;
+                                    // the format enum below is what the
+                                    // engine dispatch actually reads.
     AudioSampleFormat format = AudioSampleFormat::F32;
     uint32_t frameCount = 0;        // samples per channel
     const void* pcmData = nullptr;  // owned by caller until releaseClip()

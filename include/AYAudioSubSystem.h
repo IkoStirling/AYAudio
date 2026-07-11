@@ -16,12 +16,22 @@
 // initialize() runs. AYApplication does this from registerSubSystems() to
 // honor the `-no-audio` CLI flag (Null vs Miniaudio). When no backend is
 // installed, initialize() falls back to Null (the v0 default).
+//
+// v1.1 resource bridge: registerClipFromResource(IAudio*) lets gameplay
+// load .ayaudio through AYResource and register it with the engine in one
+// call. Returns InvalidClipId if the asset can't be mapped (unsupported
+// bit depth, zero-length PCM, etc.).
 
 #include <AYCore.h>
 #include <AYGameLoop.h>
 #include <AYAudioEngine.h>
 
 #include <IAudioBackend.h>
+
+// Forward-declare AYResource::IAudio so this header doesn't drag the
+// AYResource include path through every AYAudio consumer. The .cpp is the
+// only TU that needs the full definition.
+namespace ayt::resource { class IAudio; }
 
 #include <cstdint>
 #include <memory>
@@ -40,6 +50,13 @@ public:
     // Install the backend to use when initialize() runs. Takes ownership.
     // Has no effect after initialize() has been called.
     void setBackend(std::unique_ptr<IAudioBackend> backend);
+
+    // Register a clip from an AYResource audio asset. Maps IAudio fields
+    // (sample rate / channels / bits / sample count / data) to AudioClipDesc
+    // and registers it with the engine. Only 16-bit and 32-bit PCM are
+    // accepted (matching AudioSampleFormat::S16 / F32); other bit depths
+    // return InvalidClipId.
+    AudioClipId registerClipFromResource(const ayt::resource::IAudio* audio);
 
     bool initialize() override;
     void update(float deltaTime) override;

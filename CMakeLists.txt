@@ -83,6 +83,12 @@ target_link_libraries(${MODULE_NAME} PUBLIC
     AYCore
     AYMath
     AYGameLoop
+    # AYResource is PUBLIC so consumers can call the new
+    # AudioSubSystem::registerClipFromResource(IAudio*) bridge without
+    # re-listing AYResource themselves. AYResource's own PRIVATE deps
+    # (assimp/squish/basisu/AYLog) do not propagate through static lib
+    # link lines on MSVC, so this doesn't drag them into AYEditor demos.
+    AYResource
 )
 
 # Windows native deps for miniaudio (WASAPI / WinMM). Link system libs

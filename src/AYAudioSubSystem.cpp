@@ -1,9 +1,30 @@
 #include <AYAudioSubSystem.h>
 
 #include <AYAudioBackendFactory.h>
+#include <AYAudioClipRegistry.h>
+
+#include <IAYAudio.h>   // ayt::resource::IAudio
+
+#include <cstdint>
 
 namespace ayt::audio
 {
+
+namespace {
+
+// Map AYResource's bits-per-sample to AYAudio's AudioSampleFormat enum.
+// Only 16 and 32 are accepted: 8/24 would need a new engine dispatch path
+// (out of scope for v1.1). Returning true means the input is supported;
+// outFormat is set on success.
+bool mapBitsPerSample(uint32_t bps, AudioSampleFormat& outFormat) {
+    switch (bps) {
+        case 16: outFormat = AudioSampleFormat::S16; return true;
+        case 32: outFormat = AudioSampleFormat::F32; return true;
+        default: return false;
+    }
+}
+
+} // namespace
 
 AudioSubSystem::AudioSubSystem() {
     _descriptor.name = "Audio";
@@ -27,6 +48,40 @@ void AudioSubSystem::setBackend(std::unique_ptr<IAudioBackend> backend) {
         return;
     }
     _backend = std::move(backend);
+}
+
+AudioClipId AudioSubSystem::registerClipFromResource(const ayt::resource::IAudio* audio) {
+    if (audio == nullptr) {
+        return InvalidClipId;
+    }
+    if (_engine == nullptr || !_engine->isInitialized()) {
+        return InvalidClipId;
+    }
+
+    AudioSampleFormat fmt = AudioSampleFormat::F32;
+    if (!mapBitsPerSample(audio->getBitsPerSample(), fmt)) {
+        return InvalidClipId;
+    }
+
+    const uint32_t channels = audio->getChannels();
+    if (channels != 1 && channels != 2) {
+        return InvalidClipId;
+    }
+    const uint64_t sampleCount = audio->getSampleCount();
+    if (sampleCount == 0 || sampleCount > UINT32_MAX) {
+        return InvalidClipId;
+    }
+
+    AudioClipDesc desc{};
+    desc.sampleRate    = audio->getSampleRate();
+    desc.channels      = static_cast<uint16_t>(channels);
+    desc.bitsPerSample = static_cast<uint16_t>(audio->getBitsPerSample());
+    desc.format        = fmt;
+    // IAudio::getSampleCount returns total interleaved samples
+    // (frames * channels). AudioClipDesc.frameCount is per-channel frames.
+    desc.frameCount    = static_cast<uint32_t>(sampleCount / channels);
+    desc.pcmData       = audio->getData();
+    return _engine->registerClip(desc);
 }
 
 bool AudioSubSystem::initialize() {

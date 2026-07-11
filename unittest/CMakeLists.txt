@@ -13,6 +13,7 @@ add_executable(${TEST_TARGET}
     Test_AudioMixer.cpp
     Test_AudioEngine.cpp
     Test_MiniaudioBackend.cpp
+    Test_AudioSubSystemBridge.cpp
 )
 
 target_link_libraries(${TEST_TARGET} PRIVATE
