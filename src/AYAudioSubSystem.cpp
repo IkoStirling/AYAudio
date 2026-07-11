@@ -1,5 +1,7 @@
 #include <AYAudioSubSystem.h>
 
+#include <AYAudioBackendFactory.h>
+
 namespace ayt::audio
 {
 
@@ -17,21 +19,43 @@ const ayt::game::SubSystemDescriptor& AudioSubSystem::getDescriptor() const {
     return _descriptor;
 }
 
+void AudioSubSystem::setBackend(std::unique_ptr<IAudioBackend> backend) {
+    // The host installs a backend once, before initialize() runs. Once
+    // initialized the engine already owns a backend; swapping here would
+    // require coordinated shutdown — defer that to v2 if needed.
+    if (_engine != nullptr && _engine->isInitialized()) {
+        return;
+    }
+    _backend = std::move(backend);
+}
+
 bool AudioSubSystem::initialize() {
     _engine = std::make_unique<AudioEngine>();
 
     AudioSettings settings{};
-    // Default to Null backend — caller may install a real backend via
-    // AudioSubSystem::engine() before the first update(). AYApplication
-    // chooses Miniaudio in production builds.
-    settings.backend = AudioBackendKind::Null;
+    // AudioSettings.backend is a hint; the engine reads the actual backend
+    // from the unique_ptr installed via setBackend(). We mirror the choice
+    // so debug introspection (engine.settings()) reflects reality.
+    settings.backend = (_backend != nullptr) ? AudioBackendKind::Miniaudio
+                                            : AudioBackendKind::Null;
     settings.sampleRate = 48000;
     settings.channels = 2;
     settings.commandQueueCapacity = 256;
     settings.maxVoices = 32;
     settings.maxClips = 64;
 
-    return _engine->initialize(settings);
+    // Hand the host-installed backend to the engine BEFORE initialize() so
+    // AudioEngine::initialize picks it up (calls backend->start + attaches
+    // the engine for MiniaudioBackend).
+    if (_backend != nullptr) {
+        _engine->setBackend(std::move(_backend));
+    }
+
+    if (!_engine->initialize(settings)) {
+        _engine.reset();
+        return false;
+    }
+    return true;
 }
 
 void AudioSubSystem::update(float deltaTime) {
@@ -50,6 +74,9 @@ void AudioSubSystem::shutdown() {
         _engine->shutdown();
         _engine.reset();
     }
+    // If we never handed the backend to the engine (e.g. initialize() failed
+    // before that step), make sure it gets stopped and dropped here.
+    _backend.reset();
 }
 
 } // namespace ayt::audio

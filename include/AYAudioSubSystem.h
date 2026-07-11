@@ -11,11 +11,20 @@
 // v0.5 scope: subsystem lifecycle, Null/Mock backend selection, no editor
 // host yet (Editor uses the same subsystem with a Null backend until its
 // own host loop is wired in v1+).
+//
+// v1 integration: the host picks a backend via setBackend() *before*
+// initialize() runs. AYApplication does this from registerSubSystems() to
+// honor the `-no-audio` CLI flag (Null vs Miniaudio). When no backend is
+// installed, initialize() falls back to Null (the v0 default).
 
 #include <AYCore.h>
 #include <AYGameLoop.h>
 #include <AYAudioEngine.h>
+
+#include <IAudioBackend.h>
+
 #include <cstdint>
+#include <memory>
 
 namespace ayt::audio
 {
@@ -28,6 +37,10 @@ public:
     const char* getName() const override { return "Audio"; }
     const ayt::game::SubSystemDescriptor& getDescriptor() const override;
 
+    // Install the backend to use when initialize() runs. Takes ownership.
+    // Has no effect after initialize() has been called.
+    void setBackend(std::unique_ptr<IAudioBackend> backend);
+
     bool initialize() override;
     void update(float deltaTime) override;
     void fixedUpdate(float fixedDeltaTime) override;
@@ -38,6 +51,7 @@ public:
 
 private:
     std::unique_ptr<AudioEngine> _engine;
+    std::unique_ptr<IAudioBackend> _backend;
     ayt::game::SubSystemDescriptor _descriptor{};
 };
 
