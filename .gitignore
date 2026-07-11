@@ -1,0 +1,21 @@
+# Build outputs
+build/
+out/
+*.obj
+*.lib
+*.pdb
+*.ilk
+*.exe
+
+# IDE
+.vs/
+*.user
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test scratch
+test_isolate.cpp
+vc140.pdb
