@@ -17,9 +17,11 @@ namespace ayt::audio
 
 using AudioClipId = uint32_t;
 using VoiceHandle = uint32_t;
+using AudioStreamId = uint32_t;
 
 constexpr AudioClipId InvalidClipId = 0;
 constexpr VoiceHandle InvalidVoice = 0;
+constexpr AudioStreamId InvalidStreamId = 0;
 
 // ===== Bus taxonomy =====
 
@@ -139,18 +141,44 @@ struct AudioSettings {
 
 // ===== Per-voice runtime state (CPU side) =====
 
+// v1.5: streaming source descriptor. The producer (Resource / loader) calls
+// AudioEngine::openStream(desc) once, then asynchronously pushes interleaved
+// F32 PCM frames via streamPush(). Frame count is per-channel frames in the
+// stored interleaved layout.
+struct AudioStreamDesc {
+    uint16_t channels = 2;            // 1=mono, 2=stereo
+    uint32_t sampleRate = 48000;      // informational; engine doesn't resample
+    uint32_t capacityFrames = 16384;  // ring buffer capacity (per-channel
+                                      // frames). Rounded up to power of two.
+                                      // Default ~340ms @ 48kHz stereo.
+    bool loop = false;                // voice-stops-at-drain semantics even
+                                      // if loop=true; producer owns re-push.
+};
+
+// ===== Per-voice runtime state (CPU side) =====
+
+enum class VoiceSourceKind : uint8_t {
+    Clip,       // backed by a registered AudioClipDesc
+    Stream,     // backed by an AudioStreamRingBuffer (v1.5)
+};
+
 struct VoiceRuntime {
     AudioClipId clip = InvalidClipId;
     AudioBus bus = AudioBus::Sfx;
     SpatializationParams spatial{};
 
     float volume = 1.0f;        // user-set voice volume
-    float pitch  = 1.0f;        // playback rate scalar (v1)
+    float pitch  = 1.0f;        // playback rate scalar (consumed in v1.5)
     bool  loop   = false;
     bool  playing = false;
 
     uint64_t startFrame = 0;    // engine frame when started
     uint64_t positionFrames = 0;// current read head
+
+    // v1.5: dispatch source. When sourceKind == Stream, `stream` is the
+    // AudioStreamId of the ring buffer feeding the voice. `clip` is unused.
+    VoiceSourceKind sourceKind = VoiceSourceKind::Clip;
+    AudioStreamId   stream     = InvalidStreamId;
 };
 
 } // namespace ayt::audio

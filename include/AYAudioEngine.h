@@ -36,6 +36,8 @@
 namespace ayt::audio
 {
 
+class AudioStreamRingBuffer; // full type lives in src/AYAudioEngine.cpp
+
 class AudioEngine {
 public:
     AudioEngine();
@@ -86,6 +88,45 @@ public:
     void resume();
     bool isPaused() const { return _paused; }
 
+    // ===== Streaming PCM sources (v1.5) =====
+    //
+    // The producer (resource / loader thread) pre-registers a streaming
+    // handle, then asynchronously pushes interleaved F32 frames into the
+    // underlying SPSC ring. Voices created with playStream() drain from
+    // this ring on the audio thread.
+    //
+    // openStream / closeStream take the same dual-write path as
+    // registerClip / releaseClip (push command + synchronous apply).
+    // streamPush / playStream use direct mutation + voice allocate,
+    // matching play() / setVoiceX() patterns.
+
+    AudioStreamId openStream(const AudioStreamDesc& desc);
+    void closeStream(AudioStreamId id);
+
+    // Producer-side push. Returns frames actually written (0 when full /
+    // closed / channel mismatch). Safe from the producer thread only.
+    uint32_t streamPush(AudioStreamId id, const float* pcm, uint32_t frameCount);
+
+    // Start a voice that drains from a streaming ring buffer.
+    VoiceHandle playStream(AudioStreamId stream,
+                           AudioBus bus = AudioBus::Sfx,
+                           const SpatializationParams& spatial = {},
+                           float volume = 1.0f,
+                           bool loop = false);
+
+    // ===== Engine-wide pitch multiplier (v1.5) =====
+    //
+    // Applied to every active voice on the audio thread (`voice.pitch *
+    // timeScale`). Range clamped to [0.25, 4.0]. Mutated directly on the
+    // game thread — only `render()` reads it, so no command-queue pass
+    // (mirrors `_paused`).
+    void setTimeScale(float scale);
+    float timeScale() const { return _timeScale; }
+
+    // Diagnostic accessors for tests.
+    AudioStreamRingBuffer* streamRing(AudioStreamId id);
+    const AudioStreamDesc& streamDesc(AudioStreamId id) const;
+
     // ===== Per-frame tick (game thread) =====
 
     // Drains pending commands and applies state on the audio side. Cheap;
@@ -126,6 +167,7 @@ private:
     // ===== Internal helpers =====
     VoiceHandle _allocateVoice();
     VoiceHandle _findVoiceSlot(AudioClipId clip, bool playingOnly) const;
+    VoiceHandle _allocateVoiceIndex(uint32_t slotIdx);
 
     void _applyCommand(const AudioCommand& cmd);
     void _resolveVoice(AudioClipId clip,
@@ -160,6 +202,24 @@ private:
 
     bool _initialized = false;
     bool _paused = false;
+
+    // v1.5: fixed 8-slot streaming pool. Each slot owns a ring buffer; the
+    // game-thread producer writes via streamPush(); the audio-thread consumer
+    // reads inside renderVoiceStream().
+    struct StreamSlot {
+        AudioStreamDesc desc{};
+        std::unique_ptr<AudioStreamRingBuffer> ring;
+        bool inUse = false;
+    };
+    static constexpr uint32_t kMaxStreams = 8;
+    std::array<StreamSlot, kMaxStreams> _streams{};
+
+    // Engine-wide pitch multiplier. Clamped to [0.25, 4.0] in setTimeScale.
+    // Consumed (read) on the audio thread inside the per-voice source
+    // callbacks — game-thread writes are atomic because float writes are
+    // naturally aligned and the audio thread reads once per voice per
+    // render block; a torn read only affects a single block boundary.
+    float _timeScale = 1.0f;
 };
 
 } // namespace ayt::audio

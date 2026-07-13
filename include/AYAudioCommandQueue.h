@@ -36,6 +36,10 @@ enum class AudioCommandType : uint8_t {
     ReleaseClip,
     PauseEngine,
     ResumeEngine,
+    // v1.5: streaming source lifecycle.
+    OpenStream,     // payload: streamDesc
+    CloseStream,    // payload: stream
+    PlayStream,     // payload: stream + bus/spatial/volume/loop
 };
 
 // POD-style command. All data lives inline so the queue is a flat array.
@@ -56,6 +60,10 @@ struct AudioCommand {
     SpatializationParams spatial{};
     AudioClipDesc clipDesc{};
     ListenerParams listener{};
+
+    // v1.5 streaming payload.
+    AudioStreamDesc streamDesc{}; // OpenStream
+    AudioStreamId   stream = InvalidStreamId; // CloseStream / PlayStream
 };
 
 class AudioCommandQueue {

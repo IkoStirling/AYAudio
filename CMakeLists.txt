@@ -11,6 +11,7 @@ set(SRC_FILES
     src/AYAudioEngine.cpp
     src/AYAudioMixer.cpp
     src/AYAudioSpatializer.cpp
+    src/AYAudioStreamRingBuffer.cpp
     src/AYAudioSubSystem.cpp
 )
 
@@ -39,6 +40,7 @@ set(HEAD_FILES
     include/AYAudioEngine.h
     include/AYAudioMixer.h
     include/AYAudioSpatializer.h
+    include/AYAudioStreamRingBuffer.h
     include/AYAudioSubSystem.h
     interface/IAudioBackend.h
 )
