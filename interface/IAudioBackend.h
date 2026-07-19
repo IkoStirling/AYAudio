@@ -24,6 +24,8 @@ struct AudioBackendInfo {
     bool realDevice = false;        // true if backend opens real hardware
 };
 
+class AudioEngine;
+
 class IAudioBackend {
 public:
     virtual ~IAudioBackend() = default;
@@ -45,6 +47,10 @@ public:
 
     // True when backend actually opened a hardware device.
     virtual bool isRealDevice() const = 0;
+
+    // Optional: real-device backends that pull frames from AudioEngine in a
+    // device callback override this. Default is a no-op (Null/Mock).
+    virtual void bindAudioEngine(AudioEngine* /*engine*/) {}
 };
 
 } // namespace ayt::audio

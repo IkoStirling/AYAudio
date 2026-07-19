@@ -70,14 +70,14 @@ struct SpatializationParams {
         Inverse,         // 1 / (1 + rolloff * (d - ref))
         Linear,          // clamp(1 - (d - ref) / (max - ref), 0, 1)
         InverseClamped,  // inverse with clamp at max distance
-        CustomCurve,     // v2
+        CustomCurve,     // v2.0b: sample authored curve
     };
 
     Mode mode = Mode::Disabled;
     AttenuationModel attenuation = AttenuationModel::InverseClamped;
 
     ayt::math::FVector3 position{};
-    ayt::math::FVector3 velocity{};        // doppler (v2)
+    ayt::math::FVector3 velocity{};        // doppler (v2.0b)
     ayt::math::FVector3 forward{0, 0, -1};
 
     float referenceDistance = 1.0f;
@@ -98,11 +98,25 @@ struct SpatializationParams {
     float obstruction               = 0.0f;
     float occlusionLowPassHz        = 800.0f;
 
-    float reverbSend                = 0.0f;
-    uint8_t environmentPreset       = 0;
+    float reverbSend                = 0.0f; // 0..1 to reverb bus (v2.0b)
+    uint8_t environmentPreset       = 0;    // small room / hall (v2.0b)
 
     float sourceRadius = 0.0f;
     uint8_t priority   = 128;
+
+    // v2.0b: custom attenuation curve (authored control points).
+    // Active when `attenuation == AttenuationModel::CustomCurve`.
+    // Distance is normalized into [referenceDistance, maxDistance] → [0, 1]
+    // then linearly interpolated between two adjacent samples.
+    // If `customCurveCount == 0` the spatializer falls back to
+    // InverseClamped so default-constructed voices still produce sound.
+    struct CustomAttenuationPoint {
+        float distance = 0.0f;   // meters; samples should be ascending
+        float gain     = 1.0f;   // linear [0..1]
+    };
+    static constexpr uint8_t kMaxCustomCurvePoints = 8;
+    CustomAttenuationPoint customCurve[kMaxCustomCurvePoints]{};
+    uint8_t customCurveCount = 0;
 };
 
 // ===== Listener =====
@@ -137,6 +151,14 @@ struct AudioSettings {
 
     float masterGain = 1.0f;
     bool  enableSpatialization = true;     // master toggle for 3D paths
+
+    // v2.0b: reverb (master wet return) + ducking (Music bus sidechain).
+    // Defaults match engine defaults; AudioEngine copies these into the
+    // mixer at initialize() time. Setting depthDb == 0 disables ducking.
+    float reverbReturn       = 0.25f;      // master wet scale [0..1]
+    float duckDepthDb        = 0.0f;       // ≤ 0 dB; 0 = inactive
+    float duckAttackPerSec   = 8.0f;       // upward ramp rate (dB/s)
+    float duckReleasePerSec  = 2.0f;       // downward ramp rate (dB/s)
 };
 
 // ===== Per-voice runtime state (CPU side) =====

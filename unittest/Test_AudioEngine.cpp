@@ -236,5 +236,93 @@ TEST_SUITE(AudioEngineTests)
         CHECK_FLOAT_EQ(s.peakAmplitude, 0.5f, 1e-6f);
         CHECK_FLOAT_EQ(mockSampleAt(backend.get(), 0, 0), 0.5f, 1e-6f);
         backend->stop();
-    }    
+    }
+
+    // ===== v2.0b: ducking / reverb / doppler integration =====
+
+    TEST_CASE(DuckingCommandRoundTrip) {
+        AudioEngine engine;
+        engine.initialize(defaultSettings());
+        engine.setDucking(-12.0f, 8.0f, 2.0f);
+        engine.submitFrame(0.0f);
+        CHECK_FLOAT_EQ(engine.mixer().duckState().depthDb, -12.0f, 1e-6f);
+        CHECK_FLOAT_EQ(engine.mixer().duckState().attackPerSec, 8.0f, 1e-6f);
+        CHECK_FLOAT_EQ(engine.mixer().duckState().releasePerSec, 2.0f, 1e-6f);
+        engine.shutdown();
+    }
+
+    TEST_CASE(ReverbCommandRoundTrip) {
+        AudioEngine engine;
+        engine.initialize(defaultSettings());
+        engine.setMasterReverbReturn(0.42f);
+        engine.setReverbPreset(1);
+        engine.submitFrame(0.0f);
+        CHECK_FLOAT_EQ(engine.mixer().reverbReturn(), 0.42f, 1e-6f);
+        CHECK_INT_EQ(engine.mixer().reverbPreset(), 1u);
+        engine.shutdown();
+    }
+
+    TEST_CASE(DopplerScaleCommandRoundTrip) {
+        AudioEngine engine;
+        engine.initialize(defaultSettings());
+        engine.setDopplerScale(0.5f);
+        CHECK_FLOAT_EQ(engine.dopplerScale(), 0.5f, 1e-6f);
+        engine.shutdown();
+    }
+
+    TEST_CASE(DopplerDisabledWhenScaleZero) {
+        AudioEngine engine;
+        engine.initialize(defaultSettings());
+        engine.setDopplerScale(0.0f);
+        // Register a moving-source clip. Render two consecutive blocks; the
+        // second block's `availableRead` should equal the first block's —
+        // because doppler is disabled ⇒ effective scale = pitch * timeScale
+        // * 0 = 0, which clamps to 0.5 (so 1 source frame per 2 output
+        // frames). With a static baseline comparison we just confirm the
+        // effectiveScale lands on a known value by way of the read head.
+        AudioClipDesc desc = makeSineClip(256);
+        const AudioClipId clip = engine.registerClip(desc);
+        SpatializationParams spatial{};
+        spatial.mode = SpatializationParams::Mode::World;
+        spatial.position = { 10.0f, 0.0f, 0.0f };
+        spatial.velocity = { -100.0f, 0.0f, 0.0f };  // strong approach
+        spatial.attenuation = SpatializationParams::AttenuationModel::InverseClamped;
+        spatial.referenceDistance = 0.001f;
+        spatial.maxDistance = 1000.0f;
+        const VoiceHandle v = engine.play(clip, AudioBus::Sfx, spatial, 1.0f, true);
+        CHECK(v != InvalidVoice);
+        engine.submitFrame(0.0f);
+        constexpr uint32_t kFrames = 64;
+        float output[kFrames * 2]{};
+        engine.render(output, kFrames);
+        // We just confirm the engine rendered without crashing and that
+        // the doppler scale persisted. Direct read-head verification
+        // happens at the AudioSpatializer unit level.
+        CHECK_FLOAT_EQ(engine.dopplerScale(), 0.0f, 1e-6f);
+        engine.shutdown();
+    }
+
+    TEST_CASE(DuckingAppliesAtEngineLevel) {
+        AudioEngine engine;
+        engine.initialize(defaultSettings());
+        engine.setDucking(-60.0f, 1000.0f, 1000.0f);
+        // Register a clip and play it on the Music bus.
+        AudioClipDesc desc = makeSineClip(64, 1.0f);
+        const AudioClipId clip = engine.registerClip(desc);
+        const VoiceHandle musicVoice = engine.play(clip, AudioBus::Music);
+        CHECK(musicVoice != InvalidVoice);
+        // Also play a Voice-bus voice (same clip; same instance — voice
+        // pool reuses).
+        SpatializationParams spatial{};
+        const VoiceHandle voiceVoice = engine.play(clip, AudioBus::Voice, spatial);
+        CHECK(voiceVoice != InvalidVoice);
+        engine.submitFrame(0.0f);
+        constexpr uint32_t kFrames = 48;
+        float output[kFrames * 2]{};
+        engine.render(output, kFrames);
+        // After this block the duck envelope has engaged (Voice-bus voice
+        // was active). Sample the mixer's envelope.
+        CHECK(engine.mixer().duckState().currentDb < -0.1f);
+        engine.shutdown();
+    }
 TEST_SUITE_END

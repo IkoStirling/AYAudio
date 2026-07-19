@@ -298,4 +298,136 @@ TEST_SUITE(AudioSpatializerTests)
         CHECK_FLOAT_EQ(g.leftGain, 0.7071067f, kEps);
         CHECK_FLOAT_EQ(g.rightGain, 0.7071067f, kEps);
     }
+
+    // ===== v2.0b: CustomCurve attenuation =====
+
+    TEST_CASE(CustomCurveEmptyFallsBackToInverseClamped) {
+        SpatializationParams v = defaultVoice();
+        v.attenuation = SpatializationParams::AttenuationModel::CustomCurve;
+        v.customCurveCount = 0;
+        v.referenceDistance = 1.0f;
+        v.maxDistance = 100.0f;
+        // InverseClamped fallback: ref / max(d, ref) * rolloff.
+        const float expected = 1.0f / std::max(0.0001f, 10.0f);  // d=10, ref=1
+        CHECK_FLOAT_EQ(AudioSpatializer::distanceGain(v, 10.0f), expected, kEps);
+    }
+
+    TEST_CASE(CustomCurveSingleSampleIsConstant) {
+        SpatializationParams v = defaultVoice();
+        v.attenuation = SpatializationParams::AttenuationModel::CustomCurve;
+        v.customCurveCount = 1;
+        v.customCurve[0] = { 5.0f, 0.7f };
+        CHECK_FLOAT_EQ(AudioSpatializer::distanceGain(v, 0.0f),  0.7f, kEps);
+        CHECK_FLOAT_EQ(AudioSpatializer::distanceGain(v, 50.0f), 0.7f, kEps);
+    }
+
+    TEST_CASE(CustomCurveInterpolatesBetweenSamples) {
+        SpatializationParams v = defaultVoice();
+        v.attenuation = SpatializationParams::AttenuationModel::CustomCurve;
+        v.referenceDistance = 0.0f;
+        v.maxDistance = 1.0f;
+        v.customCurveCount = 2;
+        v.customCurve[0] = { 0.0f, 1.0f };
+        v.customCurve[1] = { 1.0f, 0.5f };
+        // Mid-distance → midpoint of [1.0, 0.5] = 0.75.
+        CHECK_FLOAT_EQ(AudioSpatializer::distanceGain(v, 0.5f), 0.75f, kEps);
+    }
+
+    TEST_CASE(CustomCurveClampsAtEdges) {
+        SpatializationParams v = defaultVoice();
+        v.attenuation = SpatializationParams::AttenuationModel::CustomCurve;
+        v.referenceDistance = 0.0f;
+        v.maxDistance = 10.0f;
+        v.customCurveCount = 3;
+        v.customCurve[0] = { 1.0f, 0.9f };
+        v.customCurve[1] = { 5.0f, 0.5f };
+        v.customCurve[2] = { 9.0f, 0.2f };
+        // distance < ref → first sample's gain.
+        CHECK_FLOAT_EQ(AudioSpatializer::distanceGain(v, -3.0f), 0.9f, kEps);
+        // distance > max → last sample's gain.
+        CHECK_FLOAT_EQ(AudioSpatializer::distanceGain(v, 100.0f), 0.2f, kEps);
+    }
+
+    TEST_CASE(CustomCurveClampsInputsToRefMax) {
+        SpatializationParams v = defaultVoice();
+        v.attenuation = SpatializationParams::AttenuationModel::CustomCurve;
+        v.referenceDistance = 10.0f;
+        v.maxDistance = 50.0f;
+        v.customCurveCount = 3;
+        v.customCurve[0] = { 10.0f, 0.9f };
+        v.customCurve[1] = { 30.0f, 0.5f };
+        v.customCurve[2] = { 50.0f, 0.2f };
+        // Out-of-range distance clamps to 50 → 0.2.
+        CHECK_FLOAT_EQ(AudioSpatializer::distanceGain(v, 200.0f), 0.2f, kEps);
+    }
+
+    // ===== v2.0b: dopplerFactor =====
+
+    TEST_CASE(DopplerStaticListenerAndSourceIsUnity) {
+        ListenerParams l = defaultListener();
+        SpatializationParams v = defaultVoice();
+        v.position = { 10.0f, 0.0f, 0.0f };
+        v.velocity = { 0.0f, 0.0f, 0.0f };
+        l.velocity = { 0.0f, 0.0f, 0.0f };
+        CHECK_FLOAT_EQ(AudioSpatializer::dopplerFactor(l, v), 1.0f, 1e-4f);
+    }
+
+    TEST_CASE(DopplerSourceMovingTowardRaisesPitch) {
+        ListenerParams l = defaultListener();
+        SpatializationParams v = defaultVoice();
+        v.position = { 10.0f, 0.0f, 0.0f };
+        // Source moving in -X (toward listener at origin).
+        v.velocity = { -5.0f, 0.0f, 0.0f };
+        l.velocity = { 0.0f, 0.0f, 0.0f };
+        const float f = AudioSpatializer::dopplerFactor(l, v);
+        CHECK(f > 1.0f);
+    }
+
+    TEST_CASE(DopplerListenerMovingTowardRaisesPitch) {
+        ListenerParams l = defaultListener();
+        SpatializationParams v = defaultVoice();
+        v.position = { 10.0f, 0.0f, 0.0f };
+        v.velocity = { 0.0f, 0.0f, 0.0f };
+        // Listener moving in +X (toward static source at +10) → higher pitch.
+        l.velocity = { 5.0f, 0.0f, 0.0f };
+        const float f = AudioSpatializer::dopplerFactor(l, v);
+        CHECK(f > 1.0f);
+    }
+
+    TEST_CASE(DopplerClampsAtMaxRatio) {
+        ListenerParams l = defaultListener();
+        SpatializationParams v = defaultVoice();
+        v.position = { 10.0f, 0.0f, 0.0f };
+        v.velocity = { 0.0f, 0.0f, 0.0f };
+        // Extreme listener velocity ⇒ ratio hits floor (0.5) ⇒ factor ceiling (2.0).
+        l.velocity = { 1.0e6f, 0.0f, 0.0f };
+        const float f = AudioSpatializer::dopplerFactor(l, v);
+        CHECK(f <= 2.0f + 1e-4f);
+        CHECK(f >= 0.5f - 1e-4f);
+    }
+
+    TEST_CASE(DopplerClampsAtMinRatio) {
+        ListenerParams l = defaultListener();
+        SpatializationParams v = defaultVoice();
+        v.position = { 10.0f, 0.0f, 0.0f };
+        l.velocity = { 0.0f, 0.0f, 0.0f };
+        // Extreme source velocity ⇒ ratio hits ceiling (2.0) ⇒ factor floor (0.5).
+        v.velocity = { -1.0e6f, 0.0f, 0.0f };
+        const float f = AudioSpatializer::dopplerFactor(l, v);
+        CHECK(f >= 0.5f - 1e-4f);
+        CHECK(f <= 2.0f + 1e-4f);
+    }
+
+    TEST_CASE(DopplerFloorAtMinDistance) {
+        ListenerParams l = defaultListener();
+        SpatializationParams v = defaultVoice();
+        v.position = { 0.0f, 0.0f, 0.0f };   // co-located with listener
+        v.velocity = { 1.0e6f, 0.0f, 0.0f };
+        l.velocity = { -1.0e6f, 0.0f, 0.0f };
+        const float f = AudioSpatializer::dopplerFactor(l, v);
+        // No NaN, no inf, within ratio envelope.
+        CHECK(f == f);                          // not NaN
+        CHECK(f >= 0.5f - 1e-4f);
+        CHECK(f <= 2.0f + 1e-4f);
+    }
 TEST_SUITE_END

@@ -2,7 +2,6 @@
 
 #include <AYAudioSpatializer.h>
 #include <AYAudioStreamRingBuffer.h>
-#include "MiniaudioBackend.h"
 
 #include <algorithm>
 #include <atomic>
@@ -411,11 +410,16 @@ bool AudioEngine::initialize(const AudioSettings& settings) {
         _commands.shutdown();
         return false;
     }
-    if (!_mixer.initialize(settings.maxVoices, settings.channels)) {
+    if (!_mixer.initialize(settings.maxVoices, settings.channels, settings.sampleRate)) {
         _clips.clear();
         _commands.shutdown();
         return false;
     }
+    // v2.0b: copy ducking + reverb settings from AudioSettings into the mixer.
+    _mixer.setDucking(settings.duckDepthDb,
+                      settings.duckAttackPerSec,
+                      settings.duckReleasePerSec);
+    _mixer.setMasterReverbReturn(settings.reverbReturn);
 
     _voices.assign(settings.maxVoices, VoiceRuntime{});
     _voiceCapacity = settings.maxVoices;
@@ -424,6 +428,7 @@ bool AudioEngine::initialize(const AudioSettings& settings) {
     _listener = ListenerParams{};
     _paused = false;
     _timeScale = 1.0f;
+    _dopplerScale = 1.0f;
 
     // Pick a backend. The engine doesn't link backends directly; the caller
     // (AudioSubSystem or a test) injects one via a setter, or we instantiate
@@ -436,16 +441,13 @@ bool AudioEngine::initialize(const AudioSettings& settings) {
         _backendInfo = AudioBackendInfo{};
         _backendInfo.name = "None";
     } else {
+        // Bind before start so the first device callback can reach the engine.
+        _backend->bindAudioEngine(this);
         _backendInfo = _backend->describe();
         if (!_backend->start(_backendInfo)) {
+            _backend->bindAudioEngine(nullptr);
             _backend.reset();
             return false;
-        }
-        // Real-device backends (currently MiniaudioBackend) pull output from
-        // the engine inside their own data callback. Hook them up after the
-        // backend is started so the engine state is fully initialized.
-        if (auto* ma = dynamic_cast<MiniaudioBackend*>(_backend.get())) {
-            ma->attachEngine(this);
         }
     }
 
@@ -490,6 +492,7 @@ void AudioEngine::shutdown() {
     _initialized = false;
     _paused = false;
     _timeScale = 1.0f;
+    _dopplerScale = 1.0f;
 }
 
 void AudioEngine::setBackend(std::unique_ptr<IAudioBackend> backend) {
@@ -859,6 +862,42 @@ void AudioEngine::setTimeScale(float scale) {
     _timeScale = std::clamp(scale, 0.25f, 4.0f);
 }
 
+// ===== v2.0b engine-side audio effects =====
+
+void AudioEngine::setDucking(float depthDb, float attackPerSec, float releasePerSec) {
+    if (!_initialized) return;
+    AudioCommand cmd{};
+    cmd.type = AudioCommandType::SetDucking;
+    cmd.scalar  = depthDb;
+    cmd.scalar2 = attackPerSec;
+    cmd.scalar3 = releasePerSec;
+    _commands.tryPush(cmd);
+    _mixer.setDucking(depthDb, attackPerSec, releasePerSec);
+}
+
+void AudioEngine::setMasterReverbReturn(float linearReturn) {
+    if (!_initialized) return;
+    AudioCommand cmd{};
+    cmd.type = AudioCommandType::SetReverbReturn;
+    cmd.scalar = std::clamp(linearReturn, 0.0f, 1.0f);
+    _commands.tryPush(cmd);
+    _mixer.setMasterReverbReturn(cmd.scalar);
+}
+
+void AudioEngine::setReverbPreset(uint8_t preset) {
+    if (!_initialized) return;
+    AudioCommand cmd{};
+    cmd.type = AudioCommandType::SetReverbPreset;
+    cmd.boolFlag = preset;
+    _commands.tryPush(cmd);
+    _mixer.setReverbPreset(preset);
+}
+
+void AudioEngine::setDopplerScale(float scale) {
+    // Game-thread direct write — same pattern as _timeScale / _paused.
+    _dopplerScale = std::clamp(scale, 0.0f, 2.0f);
+}
+
 AudioStreamRingBuffer* AudioEngine::streamRing(AudioStreamId id) {
     if (id == InvalidStreamId) return nullptr;
     const uint32_t idx = id - 1;
@@ -922,8 +961,9 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
 
     // Snapshot _timeScale once per render call so all voices see a coherent
     // value. Float writes on x86/ARM are atomic for naturally-aligned
-    // 4-byte loads; we read once.
+    // 4-byte loads; we read once. Same pattern for _dopplerScale in v2.0b.
     const float timeScale = _timeScale;
+    const float dopplerUserScale = _dopplerScale;
 
     for (uint32_t i = 0; i < _voices.size(); ++i) {
         VoiceRuntime& slot = _voices[i];
@@ -931,6 +971,11 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
             continue;
         }
         SpatialGains gains = AudioSpatializer::compute(_listener, slot.spatial, _settings.channels);
+
+        // v2.0b doppler: factor = AudioSpatializer::dopplerFactor(listener, voice)
+        // is in [0.5, 2.0]. Multiplied by user `dopplerUserScale` (default 1.0)
+        // so an author can disable doppler via setDopplerScale(0).
+        const float doppler = AudioSpatializer::dopplerFactor(_listener, slot.spatial) * dopplerUserScale;
 
         if (slot.sourceKind == VoiceSourceKind::Stream) {
             // Resolve the stream's ring buffer.
@@ -952,7 +997,9 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
             // inside renderVoiceStream. The accumulator survives across
             // calls on the stack array (zeroed at first entry, which is
             // a fresh context — see render() shape).
-            sctx.effectiveScale = std::clamp(slot.pitch * timeScale, 0.25f, 4.0f);
+            // v2.0b: doppler factor folded in. Clamp raised to [0.5, 4.0]
+            // so the doppler [0.5, 2.0] envelope isn't truncated.
+            sctx.effectiveScale = std::clamp(slot.pitch * timeScale * doppler, 0.5f, 4.0f);
             sctx.fractionalAccum = 0.0;
             sctx.lastSample[0] = 0.0f;
             sctx.lastSample[1] = 0.0f;
@@ -981,7 +1028,7 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
         // (the integer loop runs), and at integer multiples (accum crosses
         // back to 0 each call). Fractional non-1 scales will see ±1 sample
         // jitter per call; documented in design / tested in v2 / API note.
-        ctx.effectiveScale = std::clamp(slot.pitch * timeScale, 0.25f, 4.0f);
+        ctx.effectiveScale = std::clamp(slot.pitch * timeScale * doppler, 0.5f, 4.0f);
         ctx.fractionalAccum = 0.0;
         sources[activeCount] = &renderVoicePcm;
         userData[activeCount] = &clipContexts[activeCount];
@@ -990,6 +1037,13 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
     }
 
     _mixer.mix(output, frameCount, voiceSnapshot, sources, userData, activeCount);
+
+    // v2.0b: integrate duck envelope AFTER mix() (which populated the bus
+    // probe inside its per-voice loop). dt = frames / sampleRate seconds.
+    if (_settings.sampleRate > 0) {
+        const float dt = static_cast<float>(frameCount) / static_cast<float>(_settings.sampleRate);
+        _mixer.integrateDuckEnvelope(dt);
+    }
 
     // Commit read heads and prune finished voices. Both context arrays use
     // a parallel layout indexed by `i`; we look at snap.sourceKind to pick
@@ -1157,6 +1211,27 @@ void AudioEngine::_applyCommand(const AudioCommand& cmd) {
             // the voice slot with the same fields, so this is a no-op for
             // state-sync purposes. Kept so the audio thread can replay the
             // intent if a future semantic requires it.
+            (void)cmd;
+            break;
+        }
+        case AudioCommandType::SetDucking: {
+            // Mirror the engine-side immediate write.
+            _mixer.setDucking(cmd.scalar, cmd.scalar2, cmd.scalar3);
+            break;
+        }
+        case AudioCommandType::SetReverbReturn: {
+            _mixer.setMasterReverbReturn(cmd.scalar);
+            break;
+        }
+        case AudioCommandType::SetReverbPreset: {
+            _mixer.setReverbPreset(cmd.boolFlag);
+            break;
+        }
+        case AudioCommandType::SetDopplerScale: {
+            // _dopplerScale is game-thread only — same direct-write pattern
+            // as _timeScale. The command exists for symmetry/debug but the
+            // engine-side setter already wrote to _dopplerScale on the
+            // game thread, so audio-thread replay is a no-op.
             (void)cmd;
             break;
         }

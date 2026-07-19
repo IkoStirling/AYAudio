@@ -40,6 +40,11 @@ enum class AudioCommandType : uint8_t {
     OpenStream,     // payload: streamDesc
     CloseStream,    // payload: stream
     PlayStream,     // payload: stream + bus/spatial/volume/loop
+    // v2.0b: engine-side audio effects.
+    SetDucking,        // scalar=depthDb, scalar2=attackPerSec
+    SetReverbReturn,   // scalar=linearReturn
+    SetReverbPreset,   // uint8_t preset (repacked into boolFlag)
+    SetDopplerScale,   // scalar=scale [0..2]
 };
 
 // POD-style command. All data lives inline so the queue is a flat array.
@@ -52,7 +57,9 @@ struct AudioCommand {
     AudioClipId clip = InvalidClipId;
     VoiceHandle voice = InvalidVoice;
     AudioBus bus = AudioBus::Sfx;
-    float scalar = 0.0f;          // volume, pitch, gain, etc.
+    float scalar  = 0.0f;        // volume, pitch, gain, etc.
+    float scalar2 = 0.0f;        // v2.0b: secondary scalar (e.g. ducking attack)
+    float scalar3 = 0.0f;        // v2.0b: tertiary scalar (e.g. ducking release)
     uint8_t loop = 0;
     uint8_t boolFlag = 0;
 

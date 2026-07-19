@@ -75,6 +75,12 @@ public:
     static float worldDistance(const ListenerParams& listener,
                                const ayt::math::FVector3& a,
                                const ayt::math::FVector3& b);
+
+    // v2.0b: doppler pitch factor for a (listener, voice) pair. Returns
+    // a scalar in [0.5, 2.0] (the inverse of the doppler ratio). 1.0 means
+    // no shift. Pure function — game thread or audio thread safe.
+    static float dopplerFactor(const ListenerParams& listener,
+                               const SpatializationParams& voice);
 };
 
 } // namespace ayt::audio

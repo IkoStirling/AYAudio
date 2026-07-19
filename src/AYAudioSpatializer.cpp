@@ -57,11 +57,33 @@ float AudioSpatializer::distanceGain(const SpatializationParams& voice, float di
         gain *= voice.rolloffFactor;
         break;
     }
-    case Model::CustomCurve:
-    default:
-        // v2 — fall through to inverse clamped as the safe default.
-        gain = ref / std::max(0.0001f, clampf(distance, ref, max));
+    case Model::CustomCurve: {
+        // v2.0b: authored curve. Empty table falls back to InverseClamped
+        // so default-constructed voices still produce sound. Otherwise we
+        // normalize distance into [0, 1] across [ref, max], then lerp
+        // between adjacent samples.
+        const uint8_t n = (voice.customCurveCount <= SpatializationParams::kMaxCustomCurvePoints)
+                              ? voice.customCurveCount
+                              : SpatializationParams::kMaxCustomCurvePoints;
+        if (n == 0) {
+            gain = ref / std::max(0.0001f, clampf(distance, ref, max));
+            break;
+        }
+        if (n == 1) {
+            gain = voice.customCurve[0].gain;
+            break;
+        }
+        const float d = clampf(distance, ref, max);
+        const float t = (d - ref) / std::max(0.0001f, max - ref); // [0..1]
+        const float scaled = t * static_cast<float>(n - 1);
+        const uint8_t i0 = static_cast<uint8_t>(std::floor(scaled));
+        const uint8_t i1 = std::min<uint8_t>(i0 + 1, n - 1);
+        const float frac = scaled - static_cast<float>(i0);
+        const float g0 = voice.customCurve[i0].gain;
+        const float g1 = voice.customCurve[i1].gain;
+        gain = g0 + (g1 - g0) * frac;
         break;
+    }
     }
     return clampf(gain, voice.minGain, voice.maxGain);
 }
@@ -176,6 +198,51 @@ float AudioSpatializer::azimuth(const ListenerParams& listener,
     float dot = rel.x * forwardX + rel.z * forwardZ;
     float cross = rel.z * forwardX - rel.x * forwardZ;
     return std::atan2(cross, dot);
+}
+
+// v2.0b doppler. Standard textbook formula:
+//   u  = unit(source -> listener)
+//   num = c + vL · u
+//   den = c + vS · u
+//   r   = clamp(num / den, 0.5, 2.0)
+//   pitch factor = 1 / r
+// Pitch factor > 1.0 ⇒ source approaching the listener (higher pitch).
+// Pitch factor < 1.0 ⇒ source receding (lower pitch).
+//
+// c = 343 m/s (dry air, 20 °C). The 0.5 m floor on the distance projection
+// protects against degenerate co-located sources blowing the formula up;
+// worldDistance keeps its tighter 0.0001 m floor for cone / attenuation use.
+float AudioSpatializer::dopplerFactor(const ListenerParams& listener,
+                                      const SpatializationParams& voice) {
+    constexpr float kSpeedOfSound = 343.0f;       // m/s
+    constexpr float kMinDopplerDistance = 0.5f;   // m — floor for projection
+    constexpr float kDopplerMinRatio = 0.5f;
+    constexpr float kDopplerMaxRatio = 2.0f;
+
+    ayt::math::FVector3 toListener = listener.position - voice.position;
+    const float rawDist = safeSqrt(toListener.x * toListener.x +
+                                   toListener.y * toListener.y +
+                                   toListener.z * toListener.z);
+    const float projDist = std::max(rawDist, kMinDopplerDistance);
+    const float ux = toListener.x / projDist;
+    const float uy = toListener.y / projDist;
+    const float uz = toListener.z / projDist;
+
+    const float vSourceDotU    = voice.velocity.x * ux +
+                                  voice.velocity.y * uy +
+                                  voice.velocity.z * uz;
+    const float vListenerDotU  = listener.velocity.x * ux +
+                                  listener.velocity.y * uy +
+                                  listener.velocity.z * uz;
+
+    const float num = kSpeedOfSound + vListenerDotU;
+    const float den = kSpeedOfSound + vSourceDotU;
+    const float safeDen = (std::fabs(den) < 0.001f)
+                              ? (den < 0.0f ? -0.001f : 0.001f)
+                              : den;
+    float r = num / safeDen;
+    r = clampf(r, kDopplerMinRatio, kDopplerMaxRatio);
+    return 1.0f / r;
 }
 
 SpatialGains AudioSpatializer::compute(const ListenerParams& listener,

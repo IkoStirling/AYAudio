@@ -127,6 +127,25 @@ public:
     AudioStreamRingBuffer* streamRing(AudioStreamId id);
     const AudioStreamDesc& streamDesc(AudioStreamId id) const;
 
+    // ===== v2.0b engine-side audio effects =====
+
+    // Configure ducking (Music bus sidechain). `depthDb` ≤ 0 (negative = duck).
+    // `attackPerSec` and `releasePerSec` are exponential ramp rates in dB/s.
+    // depthDb == 0 disables the sidechain.
+    void setDucking(float depthDb, float attackPerSec, float releasePerSec);
+
+    // Master wet-level for the reverb send bus. 0..1 linear.
+    void setMasterReverbReturn(float linearReturn);
+
+    // Select the Schroeder reverb preset (0 = small room, 1 = hall).
+    // Out-of-range values clamp to preset 0.
+    void setReverbPreset(uint8_t preset);
+
+    // Multiplier on the doppler pitch factor computed per voice. 0 disables
+    // doppler; 1 is the engine default. Clamped to [0, 2].
+    void setDopplerScale(float scale);
+    float dopplerScale() const { return _dopplerScale; }
+
     // ===== Per-frame tick (game thread) =====
 
     // Drains pending commands and applies state on the audio side. Cheap;
@@ -220,6 +239,10 @@ private:
     // naturally aligned and the audio thread reads once per voice per
     // render block; a torn read only affects a single block boundary.
     float _timeScale = 1.0f;
+
+    // v2.0b: doppler scale multiplier. Same single-audio-thread / once-per-
+    // block snapshot pattern as _timeScale. Clamped to [0, 2].
+    float _dopplerScale = 1.0f;
 };
 
 } // namespace ayt::audio
