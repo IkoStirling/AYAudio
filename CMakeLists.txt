@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.12)
-project(AYAudio)
+project(AYAudio
+    VERSION 1.0.0
+    DESCRIPTION "AYAudio — streaming PCM ring buffer + engine-wide timeScale + resource bridge"
+)
 
 set(MODULE_NAME AYAudio)
 
@@ -109,3 +112,5 @@ target_compile_definitions(${MODULE_NAME} PRIVATE
 
 enable_testing()
 add_subdirectory(unittest)
+
+message(STATUS "AYAudio v1.0.0 (PCM ring buffer + engine-wide timeScale + resource bridge) — see ${CMAKE_CURRENT_SOURCE_DIR}/design.md")

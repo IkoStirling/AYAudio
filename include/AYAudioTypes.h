@@ -197,6 +197,13 @@ struct VoiceRuntime {
     uint64_t startFrame = 0;    // engine frame when started
     uint64_t positionFrames = 0;// current read head
 
+    // Monotonic identity assigned at play() / playStream() time. Lets the
+    // audio thread match a queued Play command back to the slot the game
+    // thread already populated, so we don't dual-allocate (see
+    // AudioEngine::_applyCommand). 0 = unallocated. Survives across
+    // stop()/play() cycles because the counter is engine-wide.
+    uint64_t voiceId = 0;
+
     // v1.5: dispatch source. When sourceKind == Stream, `stream` is the
     // AudioStreamId of the ring buffer feeding the voice. `clip` is unused.
     VoiceSourceKind sourceKind = VoiceSourceKind::Clip;

@@ -63,6 +63,16 @@ struct AudioCommand {
     uint8_t loop = 0;
     uint8_t boolFlag = 0;
 
+    // Monotonic voice identity (Play / PlayStream / SetVoice*). Carried
+    // alongside `voice` (the slot hint) so the audio thread can locate the
+    // slot the game thread already populated via _findVoiceById() instead of
+    // re-allocating a fresh slot. 0 means "no identity" (RegisterClip, etc.).
+    uint64_t voiceId = 0;
+    // Monotonic clip identity (RegisterClip). Lets the audio thread
+    // distinguish "this is a re-register of clip N" from "register a new
+    // clip". Same identity game-thread and audio-thread paths.
+    AudioClipId clipId = InvalidClipId;
+
     // Aggregate payload (used by Play/SetVoiceSpatialParams/RegisterClip/SetListener).
     SpatializationParams spatial{};
     AudioClipDesc clipDesc{};

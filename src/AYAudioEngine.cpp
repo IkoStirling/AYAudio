@@ -98,11 +98,6 @@ void renderVoicePcm(void* userData,
 
     uint64_t pos = ctx->positionFrames;
 
-    auto writeMono = [&](float s) {
-        // outer loop fills voiceBuffer directly
-        (void)s;
-    };
-
     if (identityScale) {
         ctx->fractionalAccum = 0.0; // never drift under identity.
         if (desc.format == AudioSampleFormat::F32) {
@@ -165,36 +160,70 @@ void renderVoicePcm(void* userData,
         return;
     }
 
-    // Block-quantized stepping path for non-identity scale. Mirrors the
-    // stream source: integer accum -> #source frames to advance before the
-    // next new output sample lands, fractional part carries across calls.
+    // Block-quantized stepping path for non-identity scale. Each output
+    // frame consumes `scale` source frames; the integer part drives how
+    // many positions we advance, the fractional part carries into the
+    // next call. The output sample is **linearly interpolated** between
+    // the position we land on and the next source sample using the
+    // residual fractional offset — this is what gives pitch-up smooth
+    // tonal transitions instead of nearest-sample repeat. Looping wraps
+    // the *position*; interpolation always reads the next valid sample.
     if (desc.format == AudioSampleFormat::F32) {
         const float* data = reinterpret_cast<const float*>(desc.pcmData);
         if (data == nullptr) {
             return;
         }
+        // Helpers: read source-frame sample(s) with linear interpolation.
+        // `nextPos` advances by 1, wrapping on loop, clamping on EOS.
+        auto nextPosF = [&](uint64_t p) -> uint64_t {
+            if (p + 1 < totalFrames) return p + 1;
+            return ctx->loop ? 0 : p;
+        };
         if (srcChannels == 1) {
             for (uint32_t f = 0; f < frameCount; ++f) {
                 ctx->fractionalAccum += static_cast<double>(scale);
                 int32_t wholeSteps = static_cast<int32_t>(ctx->fractionalAccum);
                 if (wholeSteps <= 0) {
-                    // Deficit — repeat last sample, or silence if voice just started.
+                    // Deficit — repeat last output sample, or silence if voice just started.
                     const float last = (f == 0) ? 0.0f : voiceBuffer[2 * (f - 1) + 0];
                     voiceBuffer[2 * f + 0] = last;
                     voiceBuffer[2 * f + 1] = last;
                     continue;
                 }
+                // Advance wholeSteps source positions; the last advance is
+                // the position we sample from. Linear-interpolate against
+                // its neighbor using the residual fraction.
+                uint64_t samplePos = pos;
                 for (int32_t s = 0; s < wholeSteps; ++s) {
-                    if (pos >= totalFrames) {
-                        if (ctx->loop) { pos = 0; } else { ctx->finished = true; break; }
+                    if (samplePos >= totalFrames) {
+                        if (ctx->loop) { samplePos = 0; } else { ctx->finished = true; break; }
                     }
                     if (s == wholeSteps - 1) {
-                        const float v = data[pos] * monoGain;
-                        voiceBuffer[2 * f + 0] = v;
-                        voiceBuffer[2 * f + 1] = v;
+                        // Land the read head on samplePos.
                     }
-                    ++pos;
+                    ++samplePos;
                 }
+                if (ctx->finished) {
+                    // Voice drained mid-step; emit silence for this frame.
+                    voiceBuffer[2 * f + 0] = 0.0f;
+                    voiceBuffer[2 * f + 1] = 0.0f;
+                    pos = samplePos;
+                    ctx->fractionalAccum -= static_cast<double>(wholeSteps);
+                    continue;
+                }
+                // samplePos landed one past the read position (because we
+                // always ++ it after using). Step back to get the actual
+                // sample position we ended on.
+                const uint64_t curPos = samplePos - 1;
+                const uint64_t nxtPos = nextPosF(curPos);
+                const float subFrac = static_cast<float>(
+                    ctx->fractionalAccum - static_cast<double>(wholeSteps));
+                const float cur = data[curPos];
+                const float nxt = data[nxtPos];
+                const float v = (cur + (nxt - cur) * subFrac) * monoGain;
+                voiceBuffer[2 * f + 0] = v;
+                voiceBuffer[2 * f + 1] = v;
+                pos = samplePos;
                 ctx->fractionalAccum -= static_cast<double>(wholeSteps);
             }
         } else {
@@ -206,18 +235,31 @@ void renderVoicePcm(void* userData,
                     voiceBuffer[2 * f + 1] = (f == 0) ? 0.0f : voiceBuffer[2 * (f - 1) + 1];
                     continue;
                 }
+                uint64_t samplePos = pos;
                 for (int32_t s = 0; s < wholeSteps; ++s) {
-                    if (pos >= totalFrames) {
-                        if (ctx->loop) { pos = 0; } else { ctx->finished = true; break; }
+                    if (samplePos >= totalFrames) {
+                        if (ctx->loop) { samplePos = 0; } else { ctx->finished = true; break; }
                     }
-                    if (s == wholeSteps - 1) {
-                        const float l = data[2 * pos + 0] * leftGain;
-                        const float r = data[2 * pos + 1] * rightGain;
-                        voiceBuffer[2 * f + 0] = l;
-                        voiceBuffer[2 * f + 1] = r;
-                    }
-                    ++pos;
+                    ++samplePos;
                 }
+                if (ctx->finished) {
+                    voiceBuffer[2 * f + 0] = 0.0f;
+                    voiceBuffer[2 * f + 1] = 0.0f;
+                    pos = samplePos;
+                    ctx->fractionalAccum -= static_cast<double>(wholeSteps);
+                    continue;
+                }
+                const uint64_t curPos = samplePos - 1;
+                const uint64_t nxtPos = nextPosF(curPos);
+                const float subFrac = static_cast<float>(
+                    ctx->fractionalAccum - static_cast<double>(wholeSteps));
+                const float curL = data[2 * curPos + 0];
+                const float curR = data[2 * curPos + 1];
+                const float nxtL = data[2 * nxtPos + 0];
+                const float nxtR = data[2 * nxtPos + 1];
+                voiceBuffer[2 * f + 0] = (curL + (nxtL - curL) * subFrac) * leftGain;
+                voiceBuffer[2 * f + 1] = (curR + (nxtR - curR) * subFrac) * rightGain;
+                pos = samplePos;
                 ctx->fractionalAccum -= static_cast<double>(wholeSteps);
             }
         }
@@ -227,6 +269,10 @@ void renderVoicePcm(void* userData,
             return;
         }
         constexpr float kInvS16 = 1.0f / 32768.0f;
+        auto nextPosI = [&](uint64_t p) -> uint64_t {
+            if (p + 1 < totalFrames) return p + 1;
+            return ctx->loop ? 0 : p;
+        };
         if (srcChannels == 1) {
             for (uint32_t f = 0; f < frameCount; ++f) {
                 ctx->fractionalAccum += static_cast<double>(scale);
@@ -237,17 +283,30 @@ void renderVoicePcm(void* userData,
                     voiceBuffer[2 * f + 1] = last;
                     continue;
                 }
+                uint64_t samplePos = pos;
                 for (int32_t s = 0; s < wholeSteps; ++s) {
-                    if (pos >= totalFrames) {
-                        if (ctx->loop) { pos = 0; } else { ctx->finished = true; break; }
+                    if (samplePos >= totalFrames) {
+                        if (ctx->loop) { samplePos = 0; } else { ctx->finished = true; break; }
                     }
-                    if (s == wholeSteps - 1) {
-                        const float v = static_cast<float>(data[pos]) * kInvS16 * monoGain;
-                        voiceBuffer[2 * f + 0] = v;
-                        voiceBuffer[2 * f + 1] = v;
-                    }
-                    ++pos;
+                    ++samplePos;
                 }
+                if (ctx->finished) {
+                    voiceBuffer[2 * f + 0] = 0.0f;
+                    voiceBuffer[2 * f + 1] = 0.0f;
+                    pos = samplePos;
+                    ctx->fractionalAccum -= static_cast<double>(wholeSteps);
+                    continue;
+                }
+                const uint64_t curPos = samplePos - 1;
+                const uint64_t nxtPos = nextPosI(curPos);
+                const float subFrac = static_cast<float>(
+                    ctx->fractionalAccum - static_cast<double>(wholeSteps));
+                const float cur = static_cast<float>(data[curPos]) * kInvS16;
+                const float nxt = static_cast<float>(data[nxtPos]) * kInvS16;
+                const float v = (cur + (nxt - cur) * subFrac) * monoGain;
+                voiceBuffer[2 * f + 0] = v;
+                voiceBuffer[2 * f + 1] = v;
+                pos = samplePos;
                 ctx->fractionalAccum -= static_cast<double>(wholeSteps);
             }
         } else {
@@ -259,24 +318,36 @@ void renderVoicePcm(void* userData,
                     voiceBuffer[2 * f + 1] = (f == 0) ? 0.0f : voiceBuffer[2 * (f - 1) + 1];
                     continue;
                 }
+                uint64_t samplePos = pos;
                 for (int32_t s = 0; s < wholeSteps; ++s) {
-                    if (pos >= totalFrames) {
-                        if (ctx->loop) { pos = 0; } else { ctx->finished = true; break; }
+                    if (samplePos >= totalFrames) {
+                        if (ctx->loop) { samplePos = 0; } else { ctx->finished = true; break; }
                     }
-                    if (s == wholeSteps - 1) {
-                        const float l = static_cast<float>(data[2 * pos + 0]) * kInvS16 * leftGain;
-                        const float r = static_cast<float>(data[2 * pos + 1]) * kInvS16 * rightGain;
-                        voiceBuffer[2 * f + 0] = l;
-                        voiceBuffer[2 * f + 1] = r;
-                    }
-                    ++pos;
+                    ++samplePos;
                 }
+                if (ctx->finished) {
+                    voiceBuffer[2 * f + 0] = 0.0f;
+                    voiceBuffer[2 * f + 1] = 0.0f;
+                    pos = samplePos;
+                    ctx->fractionalAccum -= static_cast<double>(wholeSteps);
+                    continue;
+                }
+                const uint64_t curPos = samplePos - 1;
+                const uint64_t nxtPos = nextPosI(curPos);
+                const float subFrac = static_cast<float>(
+                    ctx->fractionalAccum - static_cast<double>(wholeSteps));
+                const float curL = static_cast<float>(data[2 * curPos + 0]) * kInvS16;
+                const float curR = static_cast<float>(data[2 * curPos + 1]) * kInvS16;
+                const float nxtL = static_cast<float>(data[2 * nxtPos + 0]) * kInvS16;
+                const float nxtR = static_cast<float>(data[2 * nxtPos + 1]) * kInvS16;
+                voiceBuffer[2 * f + 0] = (curL + (nxtL - curL) * subFrac) * leftGain;
+                voiceBuffer[2 * f + 1] = (curR + (nxtR - curR) * subFrac) * rightGain;
+                pos = samplePos;
                 ctx->fractionalAccum -= static_cast<double>(wholeSteps);
             }
         }
     }
 
-    (void)writeMono; // (kept for symmetry with stream path's outFrame helper)
     ctx->positionFrames = pos;
 }
 
@@ -507,18 +578,19 @@ AudioClipId AudioEngine::registerClip(const AudioClipDesc& desc) {
     if (!_initialized) {
         return InvalidClipId;
     }
-    // Game-thread API. Push a command so the audio thread can re-resolve
-    // pointers if the clip storage ever moves (we keep it pinned for v0, but
-    // going through the queue keeps the contract symmetric with play()).
-    AudioCommand cmd{};
-    cmd.type = AudioCommandType::RegisterClip;
-    cmd.clipDesc = desc;
-    if (!_commands.tryPush(cmd)) {
+    // Game-thread immediate write so play() can find the clip on the same
+    // frame. We still push a RegisterClip command carrying `clipId` so the
+    // audio thread's _applyCommand can recognize "this is the same clip I
+    // already have" and skip the secondary registerClip() call.
+    const AudioClipId id = _clips.registerClip(desc);
+    if (id == InvalidClipId) {
         return InvalidClipId;
     }
-    // Apply on the calling side too so play() can immediately find the clip.
-    // This avoids a one-frame delay before the clip is queryable.
-    const AudioClipId id = _clips.registerClip(desc);
+    AudioCommand cmd{};
+    cmd.type = AudioCommandType::RegisterClip;
+    cmd.clipId = id;
+    cmd.clipDesc = desc;
+    _commands.tryPush(cmd);
     return id;
 }
 
@@ -528,6 +600,7 @@ void AudioEngine::releaseClip(AudioClipId id) {
     }
     AudioCommand cmd{};
     cmd.type = AudioCommandType::ReleaseClip;
+    cmd.clipId = id;
     cmd.clip = id;
     _commands.tryPush(cmd);
     _clips.releaseClip(id);
@@ -545,34 +618,39 @@ VoiceHandle AudioEngine::play(AudioClipId clip,
         return InvalidVoice;
     }
 
-    AudioCommand cmd{};
-    cmd.type = AudioCommandType::Play;
-    cmd.clip = clip;
-    cmd.bus = bus;
-    cmd.spatial = spatial;
-    cmd.scalar = std::clamp(volume, 0.0f, 8.0f);
-    cmd.loop = loop ? 1 : 0;
-
-    if (!_commands.tryPush(cmd)) {
-        return InvalidVoice;
-    }
-
     // Allocate immediately so the caller can use the handle this frame.
+    // Assign a monotonic voiceId so the audio thread's _applyCommand can
+    // locate the slot we just populated and skip re-allocation.
+    const uint64_t vid = ++_nextVoiceId;
     VoiceHandle voice = _allocateVoice();
     if (voice == InvalidVoice) {
         return InvalidVoice;
     }
     VoiceRuntime& slot = _voices[voice - 1];
     slot = VoiceRuntime{};
+    slot.voiceId = vid;
     slot.clip = clip;
     slot.bus = bus;
     slot.spatial = spatial;
-    slot.volume = cmd.scalar;
+    slot.volume = std::clamp(volume, 0.0f, 8.0f);
     slot.pitch = 1.0f;
     slot.loop = loop;
     slot.playing = true;
     slot.startFrame = _engineFrame;
     slot.positionFrames = 0;
+
+    // Audio-thread breadcrumb carries the same identity so _applyCommand
+    // sees the slot as already populated and just no-ops.
+    AudioCommand cmd{};
+    cmd.type = AudioCommandType::Play;
+    cmd.voiceId = vid;
+    cmd.voice = voice;
+    cmd.clip = clip;
+    cmd.bus = bus;
+    cmd.spatial = spatial;
+    cmd.scalar = slot.volume;
+    cmd.loop = loop ? 1 : 0;
+    _commands.tryPush(cmd);
     return voice;
 }
 
@@ -629,6 +707,7 @@ void AudioEngine::setVoicePitch(VoiceHandle voice, float pitch) {
     AudioCommand cmd{};
     cmd.type = AudioCommandType::SetVoicePitch;
     cmd.voice = voice;
+    cmd.voiceId = (voice >= 1 && voice - 1 < _voices.size()) ? _voices[voice - 1].voiceId : 0;
     cmd.scalar = pitch;
     _commands.tryPush(cmd);
 
@@ -645,6 +724,7 @@ void AudioEngine::setVoiceSpatial(VoiceHandle voice, const SpatializationParams&
     AudioCommand cmd{};
     cmd.type = AudioCommandType::SetVoiceSpatialParams;
     cmd.voice = voice;
+    cmd.voiceId = (voice >= 1 && voice - 1 < _voices.size()) ? _voices[voice - 1].voiceId : 0;
     cmd.spatial = spatial;
     _commands.tryPush(cmd);
 
@@ -825,33 +905,35 @@ VoiceHandle AudioEngine::playStream(AudioStreamId stream,
     StreamSlot& slot = _streams[idx];
     if (!slot.inUse || !slot.ring) return InvalidVoice;
 
-    AudioCommand cmd{};
-    cmd.type = AudioCommandType::PlayStream;
-    cmd.stream = stream;
-    cmd.bus = bus;
-    cmd.spatial = spatial;
-    cmd.scalar = std::clamp(volume, 0.0f, 8.0f);
-    cmd.loop = loop ? 1 : 0;
-    if (!_commands.tryPush(cmd)) {
-        return InvalidVoice;
-    }
-
+    const uint64_t vid = ++_nextVoiceId;
     VoiceHandle voice = _allocateVoice();
     if (voice == InvalidVoice) {
         return InvalidVoice;
     }
     VoiceRuntime& v = _voices[voice - 1];
     v = VoiceRuntime{};
+    v.voiceId = vid;
     v.sourceKind = VoiceSourceKind::Stream;
     v.stream = stream;
     v.bus = bus;
     v.spatial = spatial;
-    v.volume = cmd.scalar;
+    v.volume = std::clamp(volume, 0.0f, 8.0f);
     v.pitch = 1.0f;
     v.loop = loop;
     v.playing = true;
     v.startFrame = _engineFrame;
     v.positionFrames = 0;
+
+    AudioCommand cmd{};
+    cmd.type = AudioCommandType::PlayStream;
+    cmd.voiceId = vid;
+    cmd.voice = voice;
+    cmd.stream = stream;
+    cmd.bus = bus;
+    cmd.spatial = spatial;
+    cmd.scalar = v.volume;
+    cmd.loop = loop ? 1 : 0;
+    _commands.tryPush(cmd);
     return voice;
 }
 
@@ -1050,15 +1132,15 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
     // the right finished flag.
     for (uint32_t i = 0; i < activeCount; ++i) {
         const VoiceRuntime& snap = voiceSnapshot[i];
-        // Map back from snapshot to live voice slot. For clip voices we
-        // match on (clip, startFrame); for stream voices we match on
-        // (sourceKind, stream, startFrame). startFrame is monotonic so
-        // it's a reliable identity within the active subset.
+        // Map back from snapshot to live voice slot via the monotonic
+        // voiceId. voiceId is unique per play() / playStream() call and
+        // survives stop() (the counter is engine-wide), so two voices
+        // played in the same engine frame no longer collide the way they
+        // did when startFrame was the identity (see A1 in the audit).
         for (uint32_t v = 0; v < _voices.size(); ++v) {
-            if (!_voices[v].playing || _voices[v].startFrame != snap.startFrame) continue;
+            if (!_voices[v].playing || _voices[v].voiceId != snap.voiceId) continue;
             if (snap.sourceKind == VoiceSourceKind::Stream) {
                 if (_voices[v].sourceKind != VoiceSourceKind::Stream) continue;
-                if (_voices[v].stream != snap.stream) continue;
                 const StreamSourceContext& sctx = streamContexts[i];
                 if (sctx.finished) {
                     _voices[v].playing = false;
@@ -1068,7 +1150,6 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
                 break;
             } else {
                 if (_voices[v].sourceKind != VoiceSourceKind::Clip) continue;
-                if (_voices[v].clip != snap.clip) continue;
                 const VoiceSourceContext& ctx = clipContexts[i];
                 if (ctx.finished && !ctx.loop) {
                     _voices[v].playing = false;
@@ -1109,16 +1190,39 @@ VoiceHandle AudioEngine::_allocateVoice() {
     if (_nextVoiceId > _voiceCapacity) {
         return InvalidVoice;
     }
-    return _nextVoiceId++;
+    return static_cast<VoiceHandle>(_nextVoiceId++);
+}
+
+bool AudioEngine::_findVoiceById(uint64_t voiceId, uint32_t& outSlot) const {
+    if (voiceId == 0) return false;
+    for (uint32_t i = 0; i < _voices.size(); ++i) {
+        if (_voices[i].voiceId == voiceId) {
+            outSlot = i;
+            return true;
+        }
+    }
+    return false;
 }
 
 void AudioEngine::_applyCommand(const AudioCommand& cmd) {
     switch (cmd.type) {
         case AudioCommandType::Play: {
+            // The game thread already populated the slot for this voice
+            // (play() assigns voiceId and fills fields synchronously). If
+            // we find the matching slot here, the audio-thread replay is a
+            // no-op — we skip the dual-allocation that older builds did.
+            uint32_t idx;
+            if (_findVoiceById(cmd.voiceId, idx)) {
+                break;
+            }
+            // Race / corner case: game thread's slot was recycled (stop
+            // released it) before this command drained. Allocate a fresh
+            // slot and apply the command payload.
             VoiceHandle v = _allocateVoice();
             if (v == InvalidVoice) break;
             VoiceRuntime& slot = _voices[v - 1];
             slot = VoiceRuntime{};
+            slot.voiceId = cmd.voiceId ? cmd.voiceId : ++_nextVoiceId;
             slot.clip = cmd.clip;
             slot.bus = cmd.bus;
             slot.spatial = cmd.spatial;
@@ -1131,11 +1235,17 @@ void AudioEngine::_applyCommand(const AudioCommand& cmd) {
             break;
         }
         case AudioCommandType::Stop: {
-            if (cmd.voice == InvalidVoice) break;
-            const uint32_t idx = cmd.voice - 1;
-            if (idx < _voices.size()) {
+            uint32_t idx;
+            if (cmd.voiceId != 0 && _findVoiceById(cmd.voiceId, idx)) {
                 _voices[idx].playing = false;
                 _voices[idx].positionFrames = 0;
+                break;
+            }
+            if (cmd.voice == InvalidVoice) break;
+            const uint32_t vi = cmd.voice - 1;
+            if (vi < _voices.size()) {
+                _voices[vi].playing = false;
+                _voices[vi].positionFrames = 0;
             }
             break;
         }
@@ -1147,26 +1257,42 @@ void AudioEngine::_applyCommand(const AudioCommand& cmd) {
             break;
         }
         case AudioCommandType::SetVoiceVolume: {
-            if (cmd.voice == InvalidVoice) break;
-            const uint32_t idx = cmd.voice - 1;
-            if (idx < _voices.size()) {
+            uint32_t idx;
+            if (cmd.voiceId != 0 && _findVoiceById(cmd.voiceId, idx)) {
                 _voices[idx].volume = std::clamp(cmd.scalar, 0.0f, 8.0f);
+                break;
+            }
+            // Fallback for older callers / tests that didn't carry voiceId.
+            if (cmd.voice == InvalidVoice) break;
+            const uint32_t vi = cmd.voice - 1;
+            if (vi < _voices.size()) {
+                _voices[vi].volume = std::clamp(cmd.scalar, 0.0f, 8.0f);
             }
             break;
         }
         case AudioCommandType::SetVoicePitch: {
-            if (cmd.voice == InvalidVoice) break;
-            const uint32_t idx = cmd.voice - 1;
-            if (idx < _voices.size()) {
+            uint32_t idx;
+            if (cmd.voiceId != 0 && _findVoiceById(cmd.voiceId, idx)) {
                 _voices[idx].pitch = cmd.scalar;
+                break;
+            }
+            if (cmd.voice == InvalidVoice) break;
+            const uint32_t vi = cmd.voice - 1;
+            if (vi < _voices.size()) {
+                _voices[vi].pitch = cmd.scalar;
             }
             break;
         }
         case AudioCommandType::SetVoiceSpatialParams: {
-            if (cmd.voice == InvalidVoice) break;
-            const uint32_t idx = cmd.voice - 1;
-            if (idx < _voices.size()) {
+            uint32_t idx;
+            if (cmd.voiceId != 0 && _findVoiceById(cmd.voiceId, idx)) {
                 _voices[idx].spatial = cmd.spatial;
+                break;
+            }
+            if (cmd.voice == InvalidVoice) break;
+            const uint32_t vi = cmd.voice - 1;
+            if (vi < _voices.size()) {
+                _voices[vi].spatial = cmd.spatial;
             }
             break;
         }
@@ -1179,12 +1305,28 @@ void AudioEngine::_applyCommand(const AudioCommand& cmd) {
         case AudioCommandType::SetListener:
             _listener = cmd.listener;
             break;
-        case AudioCommandType::RegisterClip:
+        case AudioCommandType::RegisterClip: {
+            // Game thread already registered with the same clipId (carried
+            // in cmd.clipId); if find() hits, this is a no-op replay.
+            if (cmd.clipId != InvalidClipId && _clips.find(cmd.clipId) != nullptr) {
+                break;
+            }
+            // Pathological: game thread's register failed earlier; do the
+            // best we can — register on the audio thread using whatever
+            // free slot is available.
             _clips.registerClip(cmd.clipDesc);
             break;
-        case AudioCommandType::ReleaseClip:
-            _clips.releaseClip(cmd.clip);
+        }
+        case AudioCommandType::ReleaseClip: {
+            if (cmd.clipId != InvalidClipId) {
+                _clips.releaseClip(cmd.clipId);
+                break;
+            }
+            if (cmd.clip != InvalidClipId) {
+                _clips.releaseClip(cmd.clip);
+            }
             break;
+        }
         case AudioCommandType::PauseEngine:
             _paused = true;
             break;
@@ -1207,11 +1349,29 @@ void AudioEngine::_applyCommand(const AudioCommand& cmd) {
             break;
         }
         case AudioCommandType::PlayStream: {
-            // Symmetrical to Play. game-thread playStream() already wrote
-            // the voice slot with the same fields, so this is a no-op for
-            // state-sync purposes. Kept so the audio thread can replay the
-            // intent if a future semantic requires it.
-            (void)cmd;
+            // Same dual-write fix as Play: game thread already populated the
+            // slot under cmd.voiceId. If we find it, audio-thread replay is
+            // a no-op.
+            uint32_t idx;
+            if (_findVoiceById(cmd.voiceId, idx)) {
+                break;
+            }
+            // Race / recycle path: re-allocate and apply.
+            VoiceHandle v = _allocateVoice();
+            if (v == InvalidVoice) break;
+            VoiceRuntime& slot = _voices[v - 1];
+            slot = VoiceRuntime{};
+            slot.voiceId = cmd.voiceId ? cmd.voiceId : ++_nextVoiceId;
+            slot.sourceKind = VoiceSourceKind::Stream;
+            slot.stream = cmd.stream;
+            slot.bus = cmd.bus;
+            slot.spatial = cmd.spatial;
+            slot.volume = cmd.scalar;
+            slot.pitch = 1.0f;
+            slot.loop = cmd.loop != 0;
+            slot.playing = true;
+            slot.startFrame = _engineFrame;
+            slot.positionFrames = 0;
             break;
         }
         case AudioCommandType::SetDucking: {

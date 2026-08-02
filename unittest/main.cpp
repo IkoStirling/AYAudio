@@ -9,15 +9,8 @@
 
 #include "AYTest.h"
 
-#ifndef WIN32_LEAN_AND_MEAN
-#  define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#  define NOMINMAX
-#endif
-#include <Windows.h>
-
 int main(int argc, char* argv[]) {
-    SetConsoleOutputCP(CP_UTF8);
+    (void)argc;
+    (void)argv;
     return ayt::test::runAllTests("AYAudio");
 }

@@ -8,11 +8,12 @@ Runtime presentation audio for AY Engine (mixing, spatialization, device output)
 
 ## Status
 
-Planning — no implementation in tree yet.
+v2.0b ship — miniaudio backend + streaming voices + ducking + Schroeder
+reverb + doppler + custom attenuation curves + AYResource bridge.
 
-## Tests (when implemented)
+## Tests
 
 ```bash
-cmake --build build --target AYAudio_unittest
-./build/unittest/AYAudio_unittest
+cmake --build build --target AYAudio_Tests
+./build/AYRuntime/AYAudio/unittest/AYAudio_Tests
 ```

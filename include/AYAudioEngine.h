@@ -196,10 +196,11 @@ private:
                        bool loop,
                        VoiceHandle& outVoice);
 
-    static void _voiceSource(void* userData,
-                             uint32_t voiceIndex,
-                             float* voiceBuffer,
-                             uint32_t frameCount);
+    // Look up a voice slot by its monotonic voiceId. Returns
+    // (slotIndex, true) on hit, (0, false) on miss. O(N) linear scan; the
+    // voice pool caps at settings.maxVoices (≤ 64 in v0) so the cost is
+    // bounded. The audio thread runs this once per queued Play command.
+    bool _findVoiceById(uint64_t voiceId, uint32_t& outSlot) const;
 
     // ===== State =====
 
@@ -216,7 +217,12 @@ private:
     // Voice pool. Index 0 is unused so VoiceHandle == index + 1.
     std::vector<VoiceRuntime> _voices;
     uint32_t _voiceCapacity = 0;
-    uint32_t _nextVoiceId = 1;          // monotonic, allows gaps after stop
+    // Monotonic voice identity assigned at play() / playStream() time. The
+    // audio thread matches incoming Play commands against this id (see
+    // _findVoiceById) so that game-thread and audio-thread writes converge
+    // on the same slot instead of dual-allocating. 0 is reserved as
+    // "unallocated". uint64_t is generous but cheap.
+    uint64_t _nextVoiceId = 1;
     uint64_t _engineFrame = 0;          // ticks on every submitFrame
 
     bool _initialized = false;

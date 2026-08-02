@@ -325,4 +325,129 @@ TEST_SUITE(AudioEngineTests)
         CHECK(engine.mixer().duckState().currentDb < -0.1f);
         engine.shutdown();
     }
+
+    // ===== A1 regression: voiceId identity survives same-frame allocations =====
+
+    TEST_CASE(SameFrameTwoVoicesKeepIndependentIdentity) {
+        // Audit A1: previously voice identity was derived from startFrame, so
+        // two voices played in the same engine frame shared identity and the
+        // finished-write-back loop would clobber the survivor. With the
+        // voiceId fix each play() mints a fresh monotonic id and the render
+        // snapshot maps back via that id alone.
+        AudioEngine engine;
+        engine.initialize(defaultSettings());
+        AudioClipDesc desc = makeSineClip(64);
+        const AudioClipId clip = engine.registerClip(desc);
+
+        const VoiceHandle a = engine.play(clip, AudioBus::Sfx);
+        const VoiceHandle b = engine.play(clip, AudioBus::Ui);
+        CHECK(a != InvalidVoice);
+        CHECK(b != InvalidVoice);
+        CHECK(a != b);
+        CHECK(engine.activeVoiceCount() == 2);
+
+        // Distinct voiceIds stored on the two slots.
+        const VoiceRuntime* ra = engine.voiceAt(a - 1);
+        const VoiceRuntime* rb = engine.voiceAt(b - 1);
+        CHECK(ra != nullptr);
+        CHECK(rb != nullptr);
+        CHECK(ra->voiceId != 0);
+        CHECK(rb->voiceId != 0);
+        CHECK(ra->voiceId != rb->voiceId);
+
+        // Stop the first; the second must still be alive after render.
+        engine.stop(a);
+        engine.submitFrame(0.0f);
+        constexpr uint32_t kFrames = 16;
+        float output[kFrames * 2]{};
+        engine.render(output, kFrames);
+        CHECK(engine.activeVoiceCount() == 1);
+        CHECK(!engine.voiceAt(a - 1)->playing);
+        CHECK(engine.voiceAt(b - 1)->playing);
+
+        // Render again — b's read head must continue advancing, not be reset
+        // by the snapshot re-binding loop.
+        const uint64_t posBefore = engine.voiceAt(b - 1)->positionFrames;
+        engine.render(output, kFrames);
+        CHECK(engine.voiceAt(b - 1)->positionFrames > posBefore);
+
+        engine.shutdown();
+    }
+
+    // ===== B1 regression: audio-thread _applyCommand finds the slot the
+    // game thread populated and does not re-allocate. =====
+
+    TEST_CASE(AudioThreadApplyCommandSkipsDualAllocate) {
+        AudioEngine engine;
+        engine.initialize(defaultSettings());
+        AudioClipDesc desc = makeSineClip(64);
+        const AudioClipId clip = engine.registerClip(desc);
+
+        // Pre-condition: clip registry has one clip.
+        CHECK(engine.clipRegistry().size() == 1u);
+
+        // play() should populate the slot synchronously and the audio-thread
+        // replay (via submitFrame + render) should observe the same voice
+        // count — no second slot allocated.
+        const VoiceHandle v = engine.play(clip, AudioBus::Sfx);
+        CHECK(v != InvalidVoice);
+        CHECK(engine.activeVoiceCount() == 1u);
+
+        engine.submitFrame(0.0f);
+        constexpr uint32_t kFrames = 8;
+        float output[kFrames * 2]{};
+        engine.render(output, kFrames);
+        // After drain the count should still be 1 (one playing voice, no
+        // duplicates created by audio-thread replay).
+        CHECK(engine.activeVoiceCount() == 1u);
+
+        engine.shutdown();
+    }
+
+    // ===== A2 regression: pitch-up actually advances the read head by
+    // more than 1 source frame per output frame (i.e. the stepping loop
+    // ran wholeSteps > 1 iterations). The exact output sample values depend
+    // on the interpolation algorithm (linear vs nearest), but the read-head
+    // delta after a block must scale with pitch. =====
+
+    TEST_CASE(PitchUpAdvancesReadHeadProportionally) {
+        AudioEngine engine;
+        engine.initialize(defaultSettings());
+
+        // 1024 frames of constant 0.5 — gives plenty of headroom.
+        AudioClipDesc desc = makeSineClip(1024, 0.5f);
+        const AudioClipId clip = engine.registerClip(desc);
+        const VoiceHandle v = engine.play(clip, AudioBus::Sfx,
+                                          SpatializationParams{},
+                                          /*volume=*/1.0f,
+                                          /*loop=*/true);
+        CHECK(v != InvalidVoice);
+        engine.submitFrame(0.0f);
+
+        // Pitch 1.0 baseline.
+        engine.setVoicePitch(v, 1.0f);
+        constexpr uint32_t kFrames = 64;
+        float output[kFrames * 2]{};
+        engine.render(output, kFrames);
+        const uint64_t posAtPitch1 = engine.voiceAt(v - 1)->positionFrames;
+        CHECK(posAtPitch1 > 0u);
+
+        // Now stop, restart with pitch 2.0, render again, and confirm the
+        // read head advances roughly twice as far for the same output size.
+        engine.stop(v);
+        engine.submitFrame(0.0f);
+        const VoiceHandle v2 = engine.play(clip, AudioBus::Sfx,
+                                           SpatializationParams{},
+                                           /*volume=*/1.0f,
+                                           /*loop=*/true);
+        engine.setVoicePitch(v2, 2.0f);
+        engine.submitFrame(0.0f);
+        engine.render(output, kFrames);
+        const uint64_t posAtPitch2 = engine.voiceAt(v2 - 1)->positionFrames;
+        // Pitch 2 should advance at least ~1.5× pitch 1 over a 64-frame
+        // block (allow wide slack for the fractional accumulator settling
+        // across the very first call).
+        CHECK(posAtPitch2 > posAtPitch1 + (posAtPitch1 / 2));
+        engine.shutdown();
+    }
 TEST_SUITE_END
