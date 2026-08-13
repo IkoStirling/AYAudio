@@ -128,6 +128,7 @@ struct ListenerParams {
     ayt::math::FVector3 velocity{};
 
     float masterSpatialScale = 1.0f;       // 1 unit = 1 meter default
+    // Lightweight ILD-based HRTF approximation (v2.3). Full SOFA tables = v3.
     bool hrtfEnabled = false;
 };
 
@@ -169,7 +170,8 @@ struct AudioSettings {
 // stored interleaved layout.
 struct AudioStreamDesc {
     uint16_t channels = 2;            // 1=mono, 2=stereo
-    uint32_t sampleRate = 48000;      // informational; engine doesn't resample
+    uint32_t sampleRate = 48000;      // producer should match engine rate;
+                                      // stream-decode path resamples chunks
     uint32_t capacityFrames = 16384;  // ring buffer capacity (per-channel
                                       // frames). Rounded up to power of two.
                                       // Default ~340ms @ 48kHz stereo.

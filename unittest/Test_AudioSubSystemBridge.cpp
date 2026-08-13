@@ -111,15 +111,16 @@ TEST_SUITE(AudioSubSystemBridgeTests)
         const AudioClipId id = sub.registerClipFromResource(&audio);
         CHECK(id != ayt::audio::InvalidClipId);
 
-        // Reach into the registry to confirm the descriptor carried the
-        // resource fields through unchanged.
+        // Reach into the registry: sample-rate policy resamples 22050 → 48k.
         const auto* slot = sub.engine()->clipRegistry().find(id);
         CHECK(slot != nullptr);
-        CHECK(slot->desc.sampleRate == 22050u);
+        CHECK(slot->desc.sampleRate == 48000u);
         CHECK(slot->desc.channels == 2);
         CHECK(slot->desc.bitsPerSample == 16);
         CHECK(slot->desc.format == ayt::audio::AudioSampleFormat::S16);
-        CHECK(slot->desc.frameCount == 2u); // 8 bytes / 2 channels / 2 bytesPerSample
+        // 2 source frames @ 22050 → ~4 frames @ 48000.
+        CHECK(slot->desc.frameCount >= 4u);
+        CHECK(slot->desc.frameCount <= 5u);
 
         sub.shutdown();
     }

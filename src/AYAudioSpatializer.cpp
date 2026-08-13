@@ -277,7 +277,22 @@ SpatialGains AudioSpatializer::compute(const ListenerParams& listener,
     float pan = std::sin(az);   // sin maps -π/2..+π/2 → -1..+1, monotonic
 
     float l3 = 0.0f, r3 = 0.0f;
-    equalPowerPan(pan, l3, r3);
+    if (listener.hrtfEnabled) {
+        // Lightweight optional HRTF (v2.3): ILD approximation from azimuth.
+        // Full SOFA/HRTF tables remain v3. Start from equal-power pan, then
+        // apply contralateral shadow + ipsilateral boost.
+        equalPowerPan(pan, l3, r3);
+        const float shadow = 0.55f + 0.45f * std::cos(az); // [0.1..1]
+        if (pan >= 0.0f) {
+            l3 *= shadow;
+            r3 *= clampf(1.15f - 0.15f * shadow, 0.5f, 1.2f);
+        } else {
+            r3 *= shadow;
+            l3 *= clampf(1.15f - 0.15f * shadow, 0.5f, 1.2f);
+        }
+    } else {
+        equalPowerPan(pan, l3, r3);
+    }
     l3 *= att;
     r3 *= att;
 

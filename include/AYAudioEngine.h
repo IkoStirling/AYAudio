@@ -107,6 +107,10 @@ public:
     // closed / channel mismatch). Safe from the producer thread only.
     uint32_t streamPush(AudioStreamId id, const float* pcm, uint32_t frameCount);
 
+    // Producer: no more frames will be pushed. Remaining ring data still
+    // drains; voices finish on underrun after EOS.
+    void markStreamEndOfStream(AudioStreamId id);
+
     // Start a voice that drains from a streaming ring buffer.
     VoiceHandle playStream(AudioStreamId stream,
                            AudioBus bus = AudioBus::Sfx,

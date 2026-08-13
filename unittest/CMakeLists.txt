@@ -16,12 +16,17 @@ add_executable(${TEST_TARGET}
     Test_AudioSubSystemBridge.cpp
     Test_AudioStreamRingBuffer.cpp
     Test_AudioEngineStream.cpp
+    Test_AudioSampleRateAndHrtf.cpp
+    Test_AudioStreamingBgm.cpp
+    Test_AudioEmitterSystem.cpp
 )
 
 target_link_libraries(${TEST_TARGET} PRIVATE
     AYTest
     AYAudio
     AYMath
+    AYEntity
+    AYIO
 )
 
 target_include_directories(${TEST_TARGET} PRIVATE

@@ -44,7 +44,7 @@ Legacy reference (out of tree): **AliyatRenderer** used **OpenAL** — **not por
 | Own `.ayaudio` file format versioning | `AYResource` |
 | Participate in lockstep / deterministic simulation | `ENGINE-DETERMINISM-ARCHITECTURE.md` |
 | Run on **Server** build | `AYApplication` — Client-only subsystem |
-| Replace **AYGraph AudioGraph** (node-based authoring) | Future layer on top of AYAudio buses |
+| Replace **AYGraph AudioGraph** (node-based authoring) | `AYGraph` — AudioGraph v0 control cues on buses (see `AYGraph/design.md`) |
 | Use **OpenAL** or **SDL_audio** as the primary backend | This design: **miniaudio** (§2) |
 
 ---
@@ -155,14 +155,21 @@ struct AudioClipDesc {
 };
 ```
 
-### 3.2 Format decision checklist ✅ (locked 2026-08-13)
+### 3.2 Format decision checklist ✅ (locked 2026-08-13; sample-rate 2026-08-13)
 
 - [x] Ship format: **`.ayaudio` PCM** (Release / pack). Loose formats stripped or rejected.
 - [x] Dev formats: **WAV + MP3 + OGG** via **AYResource** decode (not inside AYAudio).
 - [x] Runtime codec in AYAudio: **no** (rejected as primary).
 - [x] Streaming: long music → `playStream` (Dev may decode incrementally; Ship may use cooked chunked PCM).
-- [ ] Sample rate policy: force 48 kHz device vs resample on register (**still open**; default = register at source rate, mixer resamples later if needed).
+- [x] **Sample rate policy (LOCKED):** engine / device target **48000 Hz**.
+  - **Cook:** `AudioConverter` defaults to resample → 48 kHz S16 PCM in `.ayaudio`.
+  - **Runtime `registerClip`:** if clip rate ≠ engine rate, **linear-resample into owned storage** (ClipRegistry). Pitch must not be used as a sample-rate substitute.
+  - **Streams:** producer should push at engine rate; stream-decoder path resamples per chunk when needed.
 - [ ] Optional future: compressed payload *inside* `.ayaudio` extension chunk (OPUS) — **not v1**.
+- [x] Lightweight optional HRTF (ILD approximation when `ListenerParams::hrtfEnabled`) — full SOFA tables remain v3.
+- [x] Custom attenuation curve (`AttenuationModel::CustomCurve`) — shipped in v2.0b.
+- [x] Long BGM stream-decode → `AudioSubSystem::playStreamingFile` (v2.2).
+- [x] ECS `AudioEmitterComponent` / `AudioListenerComponent` + `AudioEmitterSystem` @ priority 600 (v2.2).
 
 ---
 
@@ -407,7 +414,7 @@ When disabled: `NullBackend` (no device).
 | `AudioSubSystem` in `GameLoop` | v0.5 |
 | `ResourceManager` → `registerClip` | v1 |
 | `Listener` follows `Renderer` main camera | v1 |
-| `AudioEmitterComponent` + `AudioSystem` @ priority 600+ | v2 |
+| `AudioEmitterComponent` + `AudioEmitterSystem` @ priority 600 | v2.2 ✅ |
 | `AudioPlayEvent` on `AYEventSystem` | v2 |
 | Sync to animation / VMD timeline | v2 |
 
@@ -470,7 +477,9 @@ AYRuntime/AYAudio/
 | **v2** | ECS emitter, ducking, reverb send (simple algorithmic) | Entity |
 | **v2.0b** | Streaming voices + ducking + reverb/doppler polish | Resource bridge (PCM) |
 | **v2.1** | **Dev loose WAV/MP3/OGG + cook-on-pack** (§2.3 lock) | AYResource A1–A6 |
-| **v3** | HRTF optional, custom attenuation curves | Content tools |
+| **v2.2** | 48 kHz sample-rate policy + cook/runtime resample; chunked BGM stream-decode; ECS AudioEmitter/Listener | Resource + Entity |
+| **v2.3** | Lightweight optional HRTF (ITD/ILD); CustomCurve already in v2.0b | Content |
+| **v3** | Full SOFA/HRTF profiles, advanced filters (air/occlusion LP) | Content tools |
 
 **Resource format decision** locked 2026-08-13 (§2.3). v2.1 (A1–A6) shipped in AYResource.
 

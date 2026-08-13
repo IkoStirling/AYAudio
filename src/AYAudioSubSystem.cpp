@@ -2,13 +2,21 @@
 
 #include <AYAudioBackendFactory.h>
 #include <AYAudioClipRegistry.h>
+#include <AYAudioEmitterSystem.h>
+#include <AYAudioStreamRingBuffer.h>
+#include <AYWorld.h>
 
 #include <IAYAudio.h>   // ayt::resource::IAudio
+#include <Converter/AudioDecoder.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
 
 namespace ayt::audio
 {
+
+AudioSubSystem* AudioSubSystem::s_instance = nullptr;
 
 namespace {
 
@@ -24,9 +32,46 @@ bool mapBitsPerSample(uint32_t bps, AudioSampleFormat& outFormat) {
     }
 }
 
+// Linear-resample interleaved F32 from sourceRate → targetRate.
+uint32_t resampleFloatInterleaved(const float* src, uint32_t srcFrames, uint16_t ch,
+                                  uint32_t sourceRate, uint32_t targetRate,
+                                  float* dst, uint32_t dstCapacityFrames) {
+    if (src == nullptr || dst == nullptr || srcFrames == 0 || ch == 0
+        || sourceRate == 0 || targetRate == 0 || dstCapacityFrames == 0) {
+        return 0;
+    }
+    if (sourceRate == targetRate) {
+        const uint32_t n = std::min(srcFrames, dstCapacityFrames);
+        std::memcpy(dst, src, static_cast<size_t>(n) * ch * sizeof(float));
+        return n;
+    }
+    const double ratio = static_cast<double>(targetRate) / static_cast<double>(sourceRate);
+    uint32_t outFrames = static_cast<uint32_t>(static_cast<double>(srcFrames) * ratio + 0.5);
+    outFrames = std::min(outFrames, dstCapacityFrames);
+    if (outFrames == 0) {
+        return 0;
+    }
+    for (uint32_t i = 0; i < outFrames; ++i) {
+        const double srcPos = static_cast<double>(i) / ratio;
+        uint32_t i0 = static_cast<uint32_t>(srcPos);
+        if (i0 >= srcFrames) {
+            i0 = srcFrames - 1;
+        }
+        uint32_t i1 = std::min(i0 + 1, srcFrames - 1);
+        const float t = static_cast<float>(srcPos - static_cast<double>(i0));
+        for (uint16_t c = 0; c < ch; ++c) {
+            const float a = src[i0 * ch + c];
+            const float b = src[i1 * ch + c];
+            dst[i * ch + c] = a + (b - a) * t;
+        }
+    }
+    return outFrames;
+}
+
 } // namespace
 
 AudioSubSystem::AudioSubSystem() {
+    s_instance = this;
     _descriptor.name = "Audio";
     _descriptor.basePriority = 600; // see AYEntity/design.md: 600+ reserved for Audio
     _descriptor.timeType = ayt::game::SubSystemDescriptor::TimeType::Unscaled;
@@ -34,6 +79,9 @@ AudioSubSystem::AudioSubSystem() {
 
 AudioSubSystem::~AudioSubSystem() {
     shutdown();
+    if (s_instance == this) {
+        s_instance = nullptr;
+    }
 }
 
 const ayt::game::SubSystemDescriptor& AudioSubSystem::getDescriptor() const {
@@ -84,6 +132,165 @@ AudioClipId AudioSubSystem::registerClipFromResource(const ayt::resource::IAudio
     return _engine->registerClip(desc);
 }
 
+void AudioSubSystem::closePump(StreamPump& pump, bool closeEngineStream) {
+    if (pump.decoder != nullptr) {
+        ayt::resource::closeAudioStreamDecoder(
+            static_cast<ayt::resource::AudioStreamDecoder*>(pump.decoder));
+        pump.decoder = nullptr;
+    }
+    if (closeEngineStream && _engine && pump.streamId != InvalidStreamId) {
+        _engine->closeStream(pump.streamId);
+    }
+    pump.streamId = InvalidStreamId;
+    pump.voice = InvalidVoice;
+    pump.eosMarked = false;
+}
+
+StreamingPlayback AudioSubSystem::playStreamingFile(const std::string& path,
+                                                    AudioBus bus,
+                                                    bool loop,
+                                                    float volume) {
+    StreamingPlayback out{};
+    if (_engine == nullptr || !_engine->isInitialized() || path.empty()) {
+        return out;
+    }
+
+    ayt::resource::AudioStreamDecoder* dec = ayt::resource::openAudioStreamDecoder(path);
+    if (dec == nullptr) {
+        return out;
+    }
+
+    const uint16_t channels = ayt::resource::audioStreamDecoderChannels(dec);
+    const uint32_t sourceRate = ayt::resource::audioStreamDecoderSampleRate(dec);
+    if ((channels != 1 && channels != 2) || sourceRate == 0) {
+        ayt::resource::closeAudioStreamDecoder(dec);
+        return out;
+    }
+
+    AudioStreamDesc desc{};
+    desc.channels = channels;
+    desc.sampleRate = _engine->settings().sampleRate > 0
+                          ? _engine->settings().sampleRate
+                          : ayt::resource::kEngineAudioSampleRate;
+    desc.capacityFrames = 16384;
+    desc.loop = loop;
+
+    const AudioStreamId streamId = _engine->openStream(desc);
+    if (streamId == InvalidStreamId) {
+        ayt::resource::closeAudioStreamDecoder(dec);
+        return out;
+    }
+
+    StreamPump pump{};
+    pump.streamId = streamId;
+    pump.decoder = dec;
+    pump.path = path;
+    pump.sourceRate = sourceRate;
+    pump.channels = channels;
+    pump.loop = loop;
+    pump.decodeScratch.resize(static_cast<size_t>(2048) * channels);
+    pump.pushScratch.resize(static_cast<size_t>(4096) * channels);
+
+    // Prefill so playStream has audible frames on the first render.
+    _streamPumps.push_back(std::move(pump));
+    pumpStreams();
+
+    const VoiceHandle voice = _engine->playStream(streamId, bus, {}, volume, false);
+    if (voice == InvalidVoice) {
+        closePump(_streamPumps.back(), true);
+        _streamPumps.pop_back();
+        return out;
+    }
+    _streamPumps.back().voice = voice;
+
+    out.stream = streamId;
+    out.voice = voice;
+    return out;
+}
+
+void AudioSubSystem::stopStreaming(StreamingPlayback playback) {
+    if (_engine == nullptr) {
+        return;
+    }
+    if (playback.voice != InvalidVoice) {
+        _engine->stop(playback.voice);
+    }
+    for (auto it = _streamPumps.begin(); it != _streamPumps.end(); ++it) {
+        if (it->streamId == playback.stream || it->voice == playback.voice) {
+            closePump(*it, true);
+            _streamPumps.erase(it);
+            return;
+        }
+    }
+    if (playback.stream != InvalidStreamId) {
+        _engine->closeStream(playback.stream);
+    }
+}
+
+void AudioSubSystem::pumpStreams() {
+    if (_engine == nullptr || !_engine->isInitialized()) {
+        return;
+    }
+    const uint32_t targetRate = _engine->settings().sampleRate > 0
+                                    ? _engine->settings().sampleRate
+                                    : ayt::resource::kEngineAudioSampleRate;
+
+    for (auto it = _streamPumps.begin(); it != _streamPumps.end();) {
+        StreamPump& pump = *it;
+        if (pump.eosMarked || pump.decoder == nullptr || pump.streamId == InvalidStreamId) {
+            ++it;
+            continue;
+        }
+
+        auto* ring = _engine->streamRing(pump.streamId);
+        if (ring == nullptr) {
+            closePump(pump, false);
+            it = _streamPumps.erase(it);
+            continue;
+        }
+
+        // Keep the ring reasonably full (~half capacity) without spinning forever.
+        int safety = 8;
+        while (safety-- > 0 && ring->availableWrite() >= 1024) {
+            auto* dec = static_cast<ayt::resource::AudioStreamDecoder*>(pump.decoder);
+            bool eos = false;
+            const uint32_t maxDecode = 1024;
+            const uint32_t got = ayt::resource::decodeAudioStreamFrames(
+                dec, pump.decodeScratch.data(), maxDecode, &eos);
+
+            if (got > 0) {
+                const uint32_t outFrames = resampleFloatInterleaved(
+                    pump.decodeScratch.data(), got, pump.channels,
+                    pump.sourceRate, targetRate,
+                    pump.pushScratch.data(),
+                    static_cast<uint32_t>(pump.pushScratch.size() / pump.channels));
+                if (outFrames > 0) {
+                    _engine->streamPush(pump.streamId, pump.pushScratch.data(), outFrames);
+                }
+            }
+
+            if (eos || got == 0) {
+                if (pump.loop) {
+                    ayt::resource::closeAudioStreamDecoder(dec);
+                    pump.decoder = ayt::resource::openAudioStreamDecoder(pump.path);
+                    if (pump.decoder == nullptr) {
+                        _engine->markStreamEndOfStream(pump.streamId);
+                        pump.eosMarked = true;
+                        break;
+                    }
+                    continue;
+                }
+                _engine->markStreamEndOfStream(pump.streamId);
+                pump.eosMarked = true;
+                ayt::resource::closeAudioStreamDecoder(dec);
+                pump.decoder = nullptr;
+                break;
+            }
+        }
+        ++it;
+    }
+}
+
 bool AudioSubSystem::initialize() {
     _engine = std::make_unique<AudioEngine>();
 
@@ -110,10 +317,20 @@ bool AudioSubSystem::initialize() {
         _engine.reset();
         return false;
     }
+
+    // Hosts that use ECS should call registerAudioEmitterSystem() after
+    // World::initialize (e.g. from Application bootstrap). Auto-register
+    // only when World is already live so unit tests don't pollute the
+    // singleton World.
+    if (ayt::entity::World::instance().isInitialized()) {
+        registerAudioEmitterSystem();
+    }
     return true;
 }
 
 void AudioSubSystem::update(float deltaTime) {
+    (void)deltaTime;
+    pumpStreams();
     if (_engine) {
         _engine->submitFrame(deltaTime);
     }
@@ -125,6 +342,11 @@ void AudioSubSystem::fixedUpdate(float /*fixedDeltaTime*/) {
 }
 
 void AudioSubSystem::shutdown() {
+    for (StreamPump& pump : _streamPumps) {
+        closePump(pump, true);
+    }
+    _streamPumps.clear();
+
     if (_engine) {
         _engine->shutdown();
         _engine.reset();

@@ -12,4 +12,7 @@
 #include <AYAudioClipRegistry.h>
 #include <AYAudioEngine.h>
 #include <AYAudioSubSystem.h>
+#include <AYAudioEmitterSystem.h>
 #include <AYAudioBackendFactory.h>
+#include <components/AYAudioEmitterComponent.h>
+#include <components/AYAudioListenerComponent.h>

@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cassert>
 #include <cstring>
+#include <vector>
 
 namespace ayt::audio
 {
@@ -520,6 +521,15 @@ bool AudioEngine::initialize(const AudioSettings& settings) {
             _backend.reset();
             return false;
         }
+        // Device may negotiate a different rate; prefer the live describe().
+        _backendInfo = _backend->describe();
+        if (_backendInfo.sampleRate > 0
+            && _backendInfo.sampleRate != _settings.sampleRate) {
+            _settings.sampleRate = _backendInfo.sampleRate;
+            // Mixer was initialized with the requested rate; re-init sampleRate
+            // field is informational for registerClip resample — mixer block
+            // size stays valid as long as channels match.
+        }
     }
 
     _initialized = true;
@@ -578,18 +588,82 @@ AudioClipId AudioEngine::registerClip(const AudioClipDesc& desc) {
     if (!_initialized) {
         return InvalidClipId;
     }
-    // Game-thread immediate write so play() can find the clip on the same
-    // frame. We still push a RegisterClip command carrying `clipId` so the
-    // audio thread's _applyCommand can recognize "this is the same clip I
-    // already have" and skip the secondary registerClip() call.
-    const AudioClipId id = _clips.registerClip(desc);
+    AudioClipDesc normalized = desc;
+    std::vector<uint8_t> resampleScratch;
+
+    // Sample-rate policy (§3.2): engine target rate; linear-resample on
+    // register so renderVoice never uses pitch as a rate substitute.
+    const uint32_t targetRate = _settings.sampleRate > 0 ? _settings.sampleRate : 48000;
+    if (desc.sampleRate > 0 && desc.sampleRate != targetRate && desc.pcmData != nullptr
+        && desc.frameCount > 0) {
+        const uint16_t ch = desc.channels;
+        const double ratio = static_cast<double>(targetRate) / static_cast<double>(desc.sampleRate);
+        const uint32_t outFrames = static_cast<uint32_t>(
+            static_cast<double>(desc.frameCount) * ratio + 0.5);
+        if (outFrames == 0) {
+            return InvalidClipId;
+        }
+        if (desc.format == AudioSampleFormat::S16) {
+            const auto* src = static_cast<const int16_t*>(desc.pcmData);
+            resampleScratch.resize(static_cast<size_t>(outFrames) * ch * sizeof(int16_t));
+            auto* dst = reinterpret_cast<int16_t*>(resampleScratch.data());
+            for (uint32_t i = 0; i < outFrames; ++i) {
+                const double srcPos = static_cast<double>(i) / ratio;
+                uint32_t i0 = static_cast<uint32_t>(srcPos);
+                if (i0 >= desc.frameCount) {
+                    i0 = desc.frameCount - 1;
+                }
+                uint32_t i1 = std::min(i0 + 1, desc.frameCount - 1);
+                const float t = static_cast<float>(srcPos - static_cast<double>(i0));
+                for (uint16_t c = 0; c < ch; ++c) {
+                    const float a = static_cast<float>(src[i0 * ch + c]);
+                    const float b = static_cast<float>(src[i1 * ch + c]);
+                    float s = a + (b - a) * t;
+                    int32_t v = static_cast<int32_t>(s < 0.f ? s - 0.5f : s + 0.5f);
+                    v = std::clamp(v, -32768, 32767);
+                    dst[i * ch + c] = static_cast<int16_t>(v);
+                }
+            }
+            normalized.pcmData = resampleScratch.data();
+            normalized.frameCount = outFrames;
+            normalized.sampleRate = targetRate;
+        } else if (desc.format == AudioSampleFormat::F32) {
+            const auto* src = static_cast<const float*>(desc.pcmData);
+            resampleScratch.resize(static_cast<size_t>(outFrames) * ch * sizeof(float));
+            auto* dst = reinterpret_cast<float*>(resampleScratch.data());
+            for (uint32_t i = 0; i < outFrames; ++i) {
+                const double srcPos = static_cast<double>(i) / ratio;
+                uint32_t i0 = static_cast<uint32_t>(srcPos);
+                if (i0 >= desc.frameCount) {
+                    i0 = desc.frameCount - 1;
+                }
+                uint32_t i1 = std::min(i0 + 1, desc.frameCount - 1);
+                const float t = static_cast<float>(srcPos - static_cast<double>(i0));
+                for (uint16_t c = 0; c < ch; ++c) {
+                    const float a = src[i0 * ch + c];
+                    const float b = src[i1 * ch + c];
+                    dst[i * ch + c] = a + (b - a) * t;
+                }
+            }
+            normalized.pcmData = resampleScratch.data();
+            normalized.frameCount = outFrames;
+            normalized.sampleRate = targetRate;
+        }
+    }
+
+    const AudioClipId id = _clips.registerClip(normalized);
     if (id == InvalidClipId) {
         return InvalidClipId;
     }
     AudioCommand cmd{};
     cmd.type = AudioCommandType::RegisterClip;
     cmd.clipId = id;
-    cmd.clipDesc = desc;
+    cmd.clipDesc = normalized;
+    // Command copies desc by value but pcmData must point at registry storage
+    // after register — _applyCommand uses clipId to skip re-register when present.
+    if (const ClipSlot* slot = _clips.find(id)) {
+        cmd.clipDesc = slot->desc;
+    }
     _commands.tryPush(cmd);
     return id;
 }
@@ -889,6 +963,17 @@ uint32_t AudioEngine::streamPush(AudioStreamId id, const float* pcm, uint32_t fr
     StreamSlot& slot = _streams[idx];
     if (!slot.inUse || !slot.ring) return 0;
     return slot.ring->write(pcm, frameCount);
+}
+
+void AudioEngine::markStreamEndOfStream(AudioStreamId id) {
+    if (!_initialized || id == InvalidStreamId) {
+        return;
+    }
+    const uint32_t idx = id - 1;
+    if (idx >= kMaxStreams) return;
+    StreamSlot& slot = _streams[idx];
+    if (!slot.inUse || !slot.ring) return;
+    slot.ring->markEndOfStream();
 }
 
 VoiceHandle AudioEngine::playStream(AudioStreamId stream,

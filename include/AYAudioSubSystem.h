@@ -21,6 +21,9 @@
 // load .ayaudio through AYResource and register it with the engine in one
 // call. Returns InvalidClipId if the asset can't be mapped (unsupported
 // bit depth, zero-length PCM, etc.).
+//
+// v2.2 stream BGM: playStreamingFile opens an AYResource stream decoder and
+// pumps decode→resample→streamPush each update until EOS (or loops).
 
 #include <AYCore.h>
 #include <AYGameLoop.h>
@@ -35,14 +38,25 @@ namespace ayt::resource { class IAudio; }
 
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace ayt::audio
 {
+
+struct StreamingPlayback {
+    VoiceHandle voice = InvalidVoice;
+    AudioStreamId stream = InvalidStreamId;
+};
 
 class AudioSubSystem : public ayt::game::ISubSystem {
 public:
     AudioSubSystem();
     ~AudioSubSystem() override;
+
+    // Last constructed instance (GameLoop typically owns one). Tests may
+    // construct temporaries — findRegistered tracks the most recent live one.
+    static AudioSubSystem* findRegistered() { return s_instance; }
 
     const char* getName() const override { return "Audio"; }
     const ayt::game::SubSystemDescriptor& getDescriptor() const override;
@@ -58,6 +72,16 @@ public:
     // return InvalidClipId.
     AudioClipId registerClipFromResource(const ayt::resource::IAudio* audio);
 
+    // Long BGM: open file stream decoder → playStream; pump in update().
+    // Supports .wav/.mp3/.ogg (AYResource AudioDecoder). Returns invalid
+    // handles on failure.
+    StreamingPlayback playStreamingFile(const std::string& path,
+                                        AudioBus bus = AudioBus::Music,
+                                        bool loop = false,
+                                        float volume = 1.0f);
+
+    void stopStreaming(StreamingPlayback playback);
+
     bool initialize() override;
     void update(float deltaTime) override;
     void fixedUpdate(float fixedDeltaTime) override;
@@ -67,9 +91,28 @@ public:
     AudioEngine* engine() { return _engine.get(); }
 
 private:
+    struct StreamPump {
+        AudioStreamId streamId = InvalidStreamId;
+        VoiceHandle voice = InvalidVoice;
+        void* decoder = nullptr; // ayt::resource::AudioStreamDecoder*
+        std::string path;
+        uint32_t sourceRate = 0;
+        uint16_t channels = 0;
+        bool loop = false;
+        bool eosMarked = false;
+        std::vector<float> decodeScratch;
+        std::vector<float> pushScratch;
+    };
+
+    void pumpStreams();
+    void closePump(StreamPump& pump, bool closeEngineStream);
+
     std::unique_ptr<AudioEngine> _engine;
     std::unique_ptr<IAudioBackend> _backend;
     ayt::game::SubSystemDescriptor _descriptor{};
+    std::vector<StreamPump> _streamPumps;
+
+    static AudioSubSystem* s_instance;
 };
 
 } // namespace ayt::audio

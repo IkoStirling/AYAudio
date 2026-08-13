@@ -12,6 +12,7 @@ set(SRC_FILES
     src/AYAudioClipRegistry.cpp
     src/AYAudioCommandQueue.cpp
     src/AYAudioEngine.cpp
+    src/AYAudioEmitterSystem.cpp
     src/AYAudioMixer.cpp
     src/AYAudioSpatializer.cpp
     src/AYAudioStreamRingBuffer.cpp
@@ -41,10 +42,13 @@ set(HEAD_FILES
     include/AYAudioClipRegistry.h
     include/AYAudioCommandQueue.h
     include/AYAudioEngine.h
+    include/AYAudioEmitterSystem.h
     include/AYAudioMixer.h
     include/AYAudioSpatializer.h
     include/AYAudioStreamRingBuffer.h
     include/AYAudioSubSystem.h
+    include/components/AYAudioEmitterComponent.h
+    include/components/AYAudioListenerComponent.h
     interface/IAudioBackend.h
 )
 
@@ -94,6 +98,9 @@ target_link_libraries(${MODULE_NAME} PUBLIC
     # (assimp/squish/basisu/AYLog) do not propagate through static lib
     # link lines on MSVC, so this doesn't drag them into AYEditor demos.
     AYResource
+    # ECS AudioEmitter/Listener (v2.2). AYEntity does not link AYAudio,
+    # so this edge is one-way.
+    AYEntity
 )
 
 # Windows native deps for miniaudio (WASAPI / WinMM). Link system libs
