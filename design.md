@@ -71,19 +71,49 @@ Legacy reference (out of tree): **AliyatRenderer** used **OpenAL** — **not por
 
 Rationale: Editor already uses Win32 host + bgfx; audio must work when SDL2 is off. Avoid init-order coupling (`SDL_Quit` vs device teardown).
 
-### 2.3 Resource / decode path: **TBD** (open)
+### 2.3 Resource / decode path: **LOCKED** (2026-08-13)
 
-Runtime needs PCM. Source of PCM is **not finalized**:
+**Policy (owner decision):** Authoring and day-to-day iteration use **common compressed / container formats** (WAV / MP3 / OGG first; FLAC optional later). **Cook to PCM (`.ayaudio`) only when packing for ship or when a clip needs load/CPU optimization.** `AYAudio` itself never parses file formats — it only consumes PCM / stream PCM.
 
-| Strategy | Pros | Cons | Phase suggestion |
-|----------|------|------|------------------|
-| **A. Cook-only** — content pipeline converts to `.ayaudio`; runtime only loads `IAudio` | Stable, fast load, ship-friendly | Extra cook step; no “drop WAV in folder” |
-| **B. Dev loose WAV** — `AYAudio` or `AYResource` loads `.wav` in **dev** builds only | Fast iteration | Two paths; ship must strip |
-| **C. Runtime decode** — MP3/OGG via `minimp3` / `stb_vorbis` inside `AYAudio` | No cook for music | CPU spike on play; licensing/size; threading |
+| Layer | Owns | Notes |
+|-------|------|-------|
+| **AYResource** | Decode + cook | Dev: load loose `.wav`/`.mp3`/`.ogg` → PCM `IAudio`. Ship/opt: `AudioConverter` → `.ayaudio` (PCM L1). |
+| **AYAudio** | Mix / play | `registerClip` / `playStream` / buses only. No MP3/OGG includes in public headers. |
 
-**Current codebase:** `AYResource` has `.ayaudio` + `AudioConverter` (WAV → cook). **v0 runtime assumes cooked PCM** via `registerClipFromPcm()`.
+Former strategy table (kept for history):
 
-**Decision gate (before v1 ship):** pick A only, or A+B (dev), or A+C (streaming music). Document in §3.1 when decided.
+| Strategy | Role under this lock |
+|----------|----------------------|
+| **A. Cook-only `.ayaudio`** | **Ship / optimized** path (required for Release packaging) |
+| **B. Dev loose formats** | **Default in Debug / Editor** — drop file, decode on load |
+| **C. Runtime decode inside AYAudio** | **Rejected** as primary — decode stays in AYResource (keeps mixer free of codecs) |
+
+**Libraries (decode in AYResource, not AYAudio):**
+- WAV: existing PCM parser (extend to common WAVE variants as needed)
+- MP3: `minimp3` (or equivalent single-header, license-clean)
+- OGG Vorbis: `stb_vorbis` (or equivalent)
+- Prefer decode on **game / loader thread** (or cook-time worker); never on the miniaudio callback thread
+
+**Ship rules:**
+- Release / packaged builds: **`.ayaudio` only** (or pak entries thereof). Loose MP3/OGG loaders compile out or hard-fail.
+- Debug / Editor: loose formats allowed; optional background cook to `.ayaudio` for parity testing.
+- Long BGM: prefer **stream decode → `playStream`** in Dev; Ship may cook PCM chunked stream or keep compressed stream container inside `.ayaudio` extension later — v1 cook = full PCM or chunked PCM is enough.
+
+**Status (2026-08-13):** A1–A6 shipped in AYResource (`AudioDecoder` + loose loaders + cook). See §2.3.1.
+
+#### 2.3.1 Implementation slices (ordered)
+
+| Slice | Deliverable | Done when |
+|-------|-------------|-----------|
+| **A0** | Lock docs (this section + AYResource §4.2 audio policy) | ✅ Docs merged |
+| **A1** | `AudioDecoder` façade in AYResource: `decodeFile(path) → PcmBuffer` | ✅ `decodeAudioFile` + WAV UT |
+| **A2** | MP3 + OGG decode backends behind A1 | ✅ minimp3 + stb_vorbis (garbage reject UT) |
+| **A3** | Dev loader: `ResourceManager` can load `.mp3`/`.ogg`/`.wav` → `IAudio` PCM without prior cook | ✅ `AudioLoader` + bootstrap under `AY_AUDIO_LOOSE_FORMATS` |
+| **A4** | `AudioConverter` cook: mp3/ogg/wav → `.ayaudio` PCM; CLI/editor “Optimize / Pack” | ✅ Converter + `IConverter::create` / ImportJob wiring |
+| **A5** | Build flag / config: `AY_AUDIO_LOOSE_FORMATS` Debug default ON; OFF in Release | ✅ CMake `ON`/`OFF`/`CONFIG` |
+| **A6** | Bridge: Dev `IAudio` → `AudioSubSystem::registerClipFromResource` | ✅ Pre-existing bridge + Resource UT green (2026-08-13) |
+
+**Non-goals for these slices:** HRTF, runtime codec inside `AYAudio`, replacing bus mixer, Video sync.
 
 ### 2.4 Threading model ✅ (locked)
 
@@ -99,16 +129,18 @@ No OpenAL-style context on game thread.
 ### 3.1 Runtime vs resource
 
 ```
-[Authoring]  WAV/MP3/OGG  ──►  AYResource AudioConverter  ──►  .ayaudio (L1)
+[Authoring / Dev]   .wav / .mp3 / .ogg
+        │
+        ├─(Debug/Editor)──► AYResource AudioDecoder ──► IAudio (PCM in RAM)
+        │                                                      │
+        └─(Pack / Optimize)► AudioConverter ──► .ayaudio (L1 PCM)
                                       │
                                       ▼
-[Runtime]    AYResourceManager::load<IAudio>()  ──►  PCM blob + metadata
+[Runtime Ship]  ResourceManager::load<IAudio>(".ayaudio") ──► PCM blob
                                       │
                                       ▼
-              AYAudio::registerClip()  ──►  AudioClipId (engine handle)
-                                      │
-                                      ▼
-              AudioEngine::play(clipId, params)  ──►  VoiceHandle
+              AYAudio::registerClip / playStream  ──► VoiceHandle
+              (buses: Master / Music / Sfx / Ui / Voice)
 ```
 
 `AYAudio` **must not** include `assetsImpl/AYAudio.h` in **public** headers exposed to gameplay. Registration API takes plain PCM descriptor:
@@ -123,12 +155,14 @@ struct AudioClipDesc {
 };
 ```
 
-### 3.2 Format decision checklist (fill when decided)
+### 3.2 Format decision checklist ✅ (locked 2026-08-13)
 
-- [ ] Ship format: `.ayaudio` only vs loose WAV dev override
-- [ ] Runtime MP3/OGG: yes/no; if yes, which library and thread
-- [ ] Streaming vs fully resident for music (>10 MB)
-- [ ] Sample rate policy: force 48 kHz device vs resample on register
+- [x] Ship format: **`.ayaudio` PCM** (Release / pack). Loose formats stripped or rejected.
+- [x] Dev formats: **WAV + MP3 + OGG** via **AYResource** decode (not inside AYAudio).
+- [x] Runtime codec in AYAudio: **no** (rejected as primary).
+- [x] Streaming: long music → `playStream` (Dev may decode incrementally; Ship may use cooked chunked PCM).
+- [ ] Sample rate policy: force 48 kHz device vs resample on register (**still open**; default = register at source rate, mixer resamples later if needed).
+- [ ] Optional future: compressed payload *inside* `.ayaudio` extension chunk (OPUS) — **not v1**.
 
 ---
 
@@ -434,9 +468,11 @@ AYRuntime/AYAudio/
 | **v1** | Full `SpatializationParams` distance/cone/occlusion LP; `Listener` | Camera + Resource PCM register |
 | **v1.5** | Streaming buffer, pause/timeScale | GameLoop clock |
 | **v2** | ECS emitter, ducking, reverb send (simple algorithmic) | Entity |
+| **v2.0b** | Streaming voices + ducking + reverb/doppler polish | Resource bridge (PCM) |
+| **v2.1** | **Dev loose WAV/MP3/OGG + cook-on-pack** (§2.3 lock) | AYResource A1–A6 |
 | **v3** | HRTF optional, custom attenuation curves | Content tools |
 
-**Resource format decision** does not block v0–v0.5.
+**Resource format decision** locked 2026-08-13 (§2.3). v2.1 (A1–A6) shipped in AYResource.
 
 ---
 
@@ -444,4 +480,6 @@ AYRuntime/AYAudio/
 
 | Date | Change |
 |------|--------|
+| 2026-08-13 | **Implement §2.3.1 A1–A6**: AYResource `AudioDecoder` (WAV/minimp3/stb_vorbis), loose loaders, cook path, `AY_AUDIO_LOOSE_FORMATS`, ImportJob wiring |
+| 2026-08-13 | **Lock §2.3**: Dev common formats (WAV/MP3/OGG) in AYResource; cook PCM `.ayaudio` for ship/optimize only; reject codec-in-AYAudio; add §2.3.1 slices A0–A6; update §3.1/§3.2 |
 | 2026-07-11 | Initial design: miniaudio, SDL2 decoupling, spatial params, format TBD |
