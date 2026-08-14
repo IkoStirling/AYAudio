@@ -46,6 +46,12 @@ struct StreamSourceContext {
     bool loop = false;
     bool finished = false;
 
+    // Cumulative source frames successfully drained from the ring since
+    // playStream(). Written back to VoiceRuntime::positionFrames after
+    // each render block so game-thread sync clocks (AYVideo audio-master)
+    // can query media time via voicePositionFrames().
+    uint64_t positionFrames = 0;
+
     // Effective scalar = voice.pitch * audio-thread timeScale snapshot.
     // Carried per-voice because the snapshot is taken in render() once per
     // call but each voice needs its own pitch.
@@ -363,6 +369,7 @@ static bool pullOneFrame(StreamSourceContext& ctx, float* out) {
         ctx.underrunLatched = true;
         return false;
     }
+    ++ctx.positionFrames;
     out[0] = frame[0];
     if (ctx.srcChannels == 2) {
         out[1] = frame[1];
@@ -1160,6 +1167,9 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
             sctx.srcChannels = sslot->desc.channels;
             sctx.loop = slot.loop;
             sctx.finished = false;
+            // Carry the cumulative source-frame cursor across render blocks
+            // (stack context is otherwise zeroed each call).
+            sctx.positionFrames = slot.positionFrames;
             // v1.5: voice.pitch * timeScale feeds the source-step scalar
             // inside renderVoiceStream. The accumulator survives across
             // calls on the stack array (zeroed at first entry, which is
@@ -1227,11 +1237,12 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
             if (snap.sourceKind == VoiceSourceKind::Stream) {
                 if (_voices[v].sourceKind != VoiceSourceKind::Stream) continue;
                 const StreamSourceContext& sctx = streamContexts[i];
+                // Persist source frames drained so voicePositionFrames()
+                // can drive audio-master sync clocks (AYVideo V2).
+                _voices[v].positionFrames = sctx.positionFrames;
                 if (sctx.finished) {
                     _voices[v].playing = false;
                 }
-                // Stream voices don't carry a persistent read head back —
-                // the ring buffer owns its own cursor.
                 break;
             } else {
                 if (_voices[v].sourceKind != VoiceSourceKind::Clip) continue;
@@ -1258,6 +1269,13 @@ uint32_t AudioEngine::activeVoiceCount() const {
 const VoiceRuntime* AudioEngine::voiceAt(uint32_t index) const {
     if (index >= _voices.size()) return nullptr;
     return &_voices[index];
+}
+
+uint64_t AudioEngine::voicePositionFrames(VoiceHandle voice) const {
+    if (voice == InvalidVoice || voice > _voices.size()) {
+        return 0;
+    }
+    return _voices[voice - 1].positionFrames;
 }
 
 // ===== Internal helpers =====

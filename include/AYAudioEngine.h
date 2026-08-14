@@ -131,6 +131,12 @@ public:
     AudioStreamRingBuffer* streamRing(AudioStreamId id);
     const AudioStreamDesc& streamDesc(AudioStreamId id) const;
 
+    // Cumulative frames presented for a voice (clip read head, or stream
+    // source frames drained from the ring). 0 when the handle is invalid
+    // / not playing. Safe from the game thread between submitFrame/render
+    // commits — used by AYVideo SyncClock AudioMaster.
+    uint64_t voicePositionFrames(VoiceHandle voice) const;
+
     // ===== v2.0b engine-side audio effects =====
 
     // Configure ducking (Music bus sidechain). `depthDb` ≤ 0 (negative = duck).

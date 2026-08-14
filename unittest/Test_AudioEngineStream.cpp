@@ -156,6 +156,8 @@ TEST_SUITE(AudioEngineStreamTests)
 
         const float peak = peakAbs(output, kFrames, 2);
         CHECK(peak > 0.3f);
+        // Stream voices publish drained source frames for audio-master sync.
+        CHECK(engine.voicePositionFrames(v) == kFrames);
         engine.shutdown();
     }
 
