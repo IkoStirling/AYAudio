@@ -22,6 +22,9 @@ class MockBackend final : public IAudioBackend {
 public:
     bool start(const AudioBackendInfo& info) override {
         _info = info;
+        if (_info.name == nullptr) {
+            _info.name = "Mock";
+        }
         _peak = 0.0f;
         _lastBuffer.assign(static_cast<size_t>(info.channels) * 4096, 0.0f);
         _lastFrameCount = 0;

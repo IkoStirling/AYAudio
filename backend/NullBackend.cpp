@@ -18,6 +18,9 @@ class NullBackend final : public IAudioBackend {
 public:
     bool start(const AudioBackendInfo& info) override {
         _info = info;
+        if (_info.name == nullptr) {
+            _info.name = "Null";
+        }
         return true;
     }
 

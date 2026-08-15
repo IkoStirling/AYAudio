@@ -1,5 +1,6 @@
 #include <AYAudioEngine.h>
 
+#include <AYAudioBackendFactory.h>
 #include <AYAudioSpatializer.h>
 #include <AYAudioStreamRingBuffer.h>
 
@@ -367,6 +368,10 @@ static bool pullOneFrame(StreamSourceContext& ctx, float* out) {
     const uint32_t got = ctx.ring->read(frame, 1);
     if (got == 0) {
         ctx.underrunLatched = true;
+        // Still advance the media cursor: AudioMaster sync (AYVideo) must
+        // keep moving through silence, otherwise video freezes waiting for
+        // PCM that has not arrived yet.
+        ++ctx.positionFrames;
         return false;
     }
     ++ctx.positionFrames;
@@ -508,22 +513,27 @@ bool AudioEngine::initialize(const AudioSettings& settings) {
     _paused = false;
     _timeScale = 1.0f;
     _dopplerScale = 1.0f;
+    _streamUnderrunCount.store(0, std::memory_order_relaxed);
 
-    // Pick a backend. The engine doesn't link backends directly; the caller
-    // (AudioSubSystem or a test) injects one via a setter, or we instantiate
-    // the default Null backend here.
-    // For v0 we don't ship MiniaudioBackend (depends on third-party header);
-    // we'll add it in v0.5 via a factory function.
+    // Pick a backend: honor an explicit setBackend() install, otherwise
+    // construct from settings.backend (Null / Mock / Miniaudio). Header
+    // contract is "initialize picks a backend" — without this, Miniaudio
+    // in AudioSettings was a no-op and Demo stayed silent with name=None.
     if (_backend == nullptr) {
-        // Caller is expected to install the backend; without one we treat
-        // the engine as uninitialized for rendering but commands still flow.
-        _backendInfo = AudioBackendInfo{};
-        _backendInfo.name = "None";
-    } else {
+        _backend = makeBackend(settings.backend);
+        if (_backend == nullptr) {
+            return false;
+        }
+    }
+    {
+        // Seed desired rate/channels before start; device may renegotiate.
+        AudioBackendInfo startInfo{};
+        startInfo.sampleRate = settings.sampleRate > 0 ? settings.sampleRate : 48000;
+        startInfo.channels = settings.channels > 0 ? settings.channels : 2;
+        startInfo.bitsPerSample = 32;
         // Bind before start so the first device callback can reach the engine.
         _backend->bindAudioEngine(this);
-        _backendInfo = _backend->describe();
-        if (!_backend->start(_backendInfo)) {
+        if (!_backend->start(startInfo)) {
             _backend->bindAudioEngine(nullptr);
             _backend.reset();
             return false;
@@ -533,9 +543,9 @@ bool AudioEngine::initialize(const AudioSettings& settings) {
         if (_backendInfo.sampleRate > 0
             && _backendInfo.sampleRate != _settings.sampleRate) {
             _settings.sampleRate = _backendInfo.sampleRate;
-            // Mixer was initialized with the requested rate; re-init sampleRate
-            // field is informational for registerClip resample — mixer block
-            // size stays valid as long as channels match.
+            // Mixer was initialized with the requested rate; sampleRate field
+            // is informational for registerClip resample — mixer block size
+            // stays valid as long as channels match.
         }
     }
 
@@ -1093,12 +1103,18 @@ void AudioEngine::submitFrame(float /*deltaTime*/) {
     if (!_initialized) {
         return;
     }
-    // Drain queued commands. The audio thread also drains before render(),
-    // so this just keeps the game-thread view of state current.
-    AudioCommand cmd{};
-    int safety = 4096;
-    while (safety-- > 0 && _commands.tryPop(cmd)) {
-        _applyCommand(cmd);
+    // SPSC command queue: exactly one consumer may pop. With a real device
+    // the Miniaudio callback thread owns drain via render(). Popping here on
+    // the game thread races that callback (torn commands, double-apply, lost
+    // Stop/SetGain) and has caused "stream open OK but silent" Gallery bugs.
+    // Null/Mock have no audio thread — drain on the game tick instead.
+    const bool realDevice = (_backend != nullptr && _backend->isRealDevice());
+    if (!realDevice) {
+        AudioCommand cmd{};
+        int safety = 4096;
+        while (safety-- > 0 && _commands.tryPop(cmd)) {
+            _applyCommand(cmd);
+        }
     }
     ++_engineFrame;
 }
@@ -1240,6 +1256,9 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
                 // Persist source frames drained so voicePositionFrames()
                 // can drive audio-master sync clocks (AYVideo V2).
                 _voices[v].positionFrames = sctx.positionFrames;
+                if (sctx.underrunLatched) {
+                    _streamUnderrunCount.fetch_add(1, std::memory_order_relaxed);
+                }
                 if (sctx.finished) {
                     _voices[v].playing = false;
                 }

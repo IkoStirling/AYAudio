@@ -9,7 +9,7 @@
 #include <AYAudioSubSystem.h>
 
 #include <IAYAudio.h>   // ayt::resource::IAudio
-#include <aymath/MathDefs.h> // brings UInt8/UInt32/UInt64/Float32 into global ns
+#include <AYMath/MathDefs.h> // brings UInt8/UInt32/UInt64/Float32 into global ns
 
 #include "AYTest.h"
 

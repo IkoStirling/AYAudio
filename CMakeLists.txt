@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
 project(AYAudio
     VERSION 1.0.0
-    DESCRIPTION "AYAudio â€” streaming PCM ring buffer + engine-wide timeScale + resource bridge"
+    DESCRIPTION "AYAudio â€?streaming PCM ring buffer + engine-wide timeScale + resource bridge"
 )
 
 set(MODULE_NAME AYAudio)
@@ -55,7 +55,7 @@ set(HEAD_FILES
 # Locate miniaudio.h. Prefer system paths (vcpkg install layout, etc.) via
 # find_path; if nothing is found, fall back to the in-tree vcpkg layout we use
 # in this workspace so the build keeps working on machines without vcpkg on
-# PATH. miniaudio is a header-only C library â€” no link target is needed, but
+# PATH. miniaudio is a header-only C library â€?no link target is needed, but
 # the TU that #includes it must #define MINIAUDIO_IMPLEMENTATION exactly once.
 find_path(MINIAUDIO_INCLUDE_DIRS "miniaudio.h")
 if(NOT MINIAUDIO_INCLUDE_DIRS)
@@ -119,5 +119,6 @@ target_compile_definitions(${MODULE_NAME} PRIVATE
 
 enable_testing()
 add_subdirectory(unittest)
+add_subdirectory(demo)
 
-message(STATUS "AYAudio v1.0.0 (PCM ring buffer + engine-wide timeScale + resource bridge) â€” see ${CMAKE_CURRENT_SOURCE_DIR}/design.md")
+message(STATUS "AYAudio v1.0.0 (PCM ring buffer + engine-wide timeScale + resource bridge) â€?see ${CMAKE_CURRENT_SOURCE_DIR}/design.md")

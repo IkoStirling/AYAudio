@@ -29,6 +29,7 @@
 #include <IAudioBackend.h>
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -136,6 +137,11 @@ public:
     // / not playing. Safe from the game thread between submitFrame/render
     // commits — used by AYVideo SyncClock AudioMaster.
     uint64_t voicePositionFrames(VoiceHandle voice) const;
+
+    // Cumulative stream underrun events (audio-thread). Diagnostic for
+    // AYVideo bridge health; increments when a stream voice reads 0 frames
+    // from its ring in a render block.
+    uint64_t streamUnderrunCount() const { return _streamUnderrunCount; }
 
     // ===== v2.0b engine-side audio effects =====
 
@@ -255,6 +261,9 @@ private:
     // naturally aligned and the audio thread reads once per voice per
     // render block; a torn read only affects a single block boundary.
     float _timeScale = 1.0f;
+
+    // Audio-thread underrun tally (see streamUnderrunCount).
+    std::atomic<uint64_t> _streamUnderrunCount{0};
 
     // v2.0b: doppler scale multiplier. Same single-audio-thread / once-per-
     // block snapshot pattern as _timeScale. Clamped to [0, 2].

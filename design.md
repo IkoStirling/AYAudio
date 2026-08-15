@@ -489,6 +489,8 @@ AYRuntime/AYAudio/
 
 | Date | Change |
 |------|--------|
+| 2026-08-15 | **AYAudio Editor** (AYUI): `AudioEditorSession` + `AYAudio_AudioEditor` + Editor Tools child; Editor registers `AudioSubSystem` |
+| 2026-08-15 | **AYAudio_Gallery** demo: Win32 mixer UI (beeps, buses, spatial, duck/reverb/timeScale, stream open) |
 | 2026-08-13 | **Implement §2.3.1 A1–A6**: AYResource `AudioDecoder` (WAV/minimp3/stb_vorbis), loose loaders, cook path, `AY_AUDIO_LOOSE_FORMATS`, ImportJob wiring |
 | 2026-08-13 | **Lock §2.3**: Dev common formats (WAV/MP3/OGG) in AYResource; cook PCM `.ayaudio` for ship/optimize only; reject codec-in-AYAudio; add §2.3.1 slices A0–A6; update §3.1/§3.2 |
 | 2026-07-11 | Initial design: miniaudio, SDL2 decoupling, spatial params, format TBD |

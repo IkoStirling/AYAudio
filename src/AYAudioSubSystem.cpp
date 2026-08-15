@@ -10,7 +10,9 @@
 #include <Converter/AudioDecoder.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 namespace ayt::audio
@@ -152,17 +154,34 @@ StreamingPlayback AudioSubSystem::playStreamingFile(const std::string& path,
                                                     float volume) {
     StreamingPlayback out{};
     if (_engine == nullptr || !_engine->isInitialized() || path.empty()) {
+        std::fprintf(stderr,
+                     "[AYAudio] playStreamingFile: reject (engine=%p init=%d "
+                     "pathEmpty=%d)\n",
+                     static_cast<void*>(_engine.get()),
+                     (_engine && _engine->isInitialized()) ? 1 : 0,
+                     path.empty() ? 1 : 0);
+        std::fflush(stderr);
         return out;
     }
 
     ayt::resource::AudioStreamDecoder* dec = ayt::resource::openAudioStreamDecoder(path);
     if (dec == nullptr) {
+        std::fprintf(stderr,
+                     "[AYAudio] playStreamingFile: openAudioStreamDecoder "
+                     "failed path=\"%s\" (missing file / bad encode / unsupported "
+                     "ext — need .wav/.mp3/.ogg)\n",
+                     path.c_str());
+        std::fflush(stderr);
         return out;
     }
 
     const uint16_t channels = ayt::resource::audioStreamDecoderChannels(dec);
     const uint32_t sourceRate = ayt::resource::audioStreamDecoderSampleRate(dec);
     if ((channels != 1 && channels != 2) || sourceRate == 0) {
+        std::fprintf(stderr,
+                     "[AYAudio] playStreamingFile: bad stream meta ch=%u rate=%u\n",
+                     static_cast<unsigned>(channels), sourceRate);
+        std::fflush(stderr);
         ayt::resource::closeAudioStreamDecoder(dec);
         return out;
     }
@@ -177,6 +196,8 @@ StreamingPlayback AudioSubSystem::playStreamingFile(const std::string& path,
 
     const AudioStreamId streamId = _engine->openStream(desc);
     if (streamId == InvalidStreamId) {
+        std::fprintf(stderr, "[AYAudio] playStreamingFile: openStream failed\n");
+        std::fflush(stderr);
         ayt::resource::closeAudioStreamDecoder(dec);
         return out;
     }
@@ -191,17 +212,60 @@ StreamingPlayback AudioSubSystem::playStreamingFile(const std::string& path,
     pump.decodeScratch.resize(static_cast<size_t>(2048) * channels);
     pump.pushScratch.resize(static_cast<size_t>(4096) * channels);
 
-    // Prefill so playStream has audible frames on the first render.
+    // Prefill, skip near-silent lead-in (common on ambient beds), then
+    // optionally makeup so quiet masters are audible without clipping later.
     _streamPumps.push_back(std::move(pump));
+    float contentPeak = 0.0f;
+    for (int pass = 0; pass < 64; ++pass) {
+        pumpStreams();
+        StreamPump& p = _streamPumps.back();
+        if (p.lastPumpPeak > contentPeak) {
+            contentPeak = p.lastPumpPeak;
+        }
+        if (contentPeak >= 0.02f || p.eosMarked) {
+            break;
+        }
+        // Discard near-silent prefill so playback starts on real content.
+        if (auto* ring = _engine->streamRing(p.streamId)) {
+            float discard[2048];
+            const uint32_t maxFrames =
+                2048u / static_cast<uint32_t>(std::max<uint16_t>(p.channels, 1));
+            while (ring->availableRead() > 0) {
+                const uint32_t n = std::min(ring->availableRead(), maxFrames);
+                if (n == 0) {
+                    break;
+                }
+                ring->read(discard, n);
+            }
+        }
+    }
+    // Refill after silence skip so the ring isn't empty at playStream.
     pumpStreams();
 
-    const VoiceHandle voice = _engine->playStream(streamId, bus, {}, volume, false);
+    float playVol = volume;
+    if (contentPeak > 1.0e-4f && contentPeak < 0.12f) {
+        playVol = std::min(8.0f, volume * (0.30f / contentPeak));
+    }
+
+    const VoiceHandle voice =
+        _engine->playStream(streamId, bus, {}, playVol, false);
     if (voice == InvalidVoice) {
+        std::fprintf(stderr, "[AYAudio] playStreamingFile: playStream failed\n");
+        std::fflush(stderr);
         closePump(_streamPumps.back(), true);
         _streamPumps.pop_back();
         return out;
     }
     _streamPumps.back().voice = voice;
+
+    std::fprintf(stderr,
+                 "[AYAudio] playStreamingFile: OK path=\"%s\" ch=%u srcRate=%u "
+                 "engineRate=%u voice=%u stream=%u vol=%.2f (req=%.2f) "
+                 "contentPeak=%.4f bus=%u\n",
+                 path.c_str(), static_cast<unsigned>(channels), sourceRate,
+                 desc.sampleRate, voice, streamId, playVol, volume, contentPeak,
+                 static_cast<unsigned>(bus));
+    std::fflush(stderr);
 
     out.stream = streamId;
     out.voice = voice;
@@ -251,6 +315,8 @@ void AudioSubSystem::pumpStreams() {
 
         // Keep the ring reasonably full (~half capacity) without spinning forever.
         int safety = 8;
+        float pumpPeak = 0.0f;
+        uint32_t pumpFrames = 0;
         while (safety-- > 0 && ring->availableWrite() >= 1024) {
             auto* dec = static_cast<ayt::resource::AudioStreamDecoder*>(pump.decoder);
             bool eos = false;
@@ -265,7 +331,17 @@ void AudioSubSystem::pumpStreams() {
                     pump.pushScratch.data(),
                     static_cast<uint32_t>(pump.pushScratch.size() / pump.channels));
                 if (outFrames > 0) {
-                    _engine->streamPush(pump.streamId, pump.pushScratch.data(), outFrames);
+                    const size_t n =
+                        static_cast<size_t>(outFrames) * pump.channels;
+                    for (size_t i = 0; i < n; ++i) {
+                        const float a = std::fabs(pump.pushScratch[i]);
+                        if (a > pumpPeak) {
+                            pumpPeak = a;
+                        }
+                    }
+                    pumpFrames += outFrames;
+                    _engine->streamPush(pump.streamId, pump.pushScratch.data(),
+                                        outFrames);
                 }
             }
 
@@ -287,11 +363,28 @@ void AudioSubSystem::pumpStreams() {
                 break;
             }
         }
+        if (pumpFrames > 0) {
+            pump.lastPumpPeak = pumpPeak;
+            ++pump.diagTicks;
+            // Throttled diagnostic: first fill + every ~1s @ 60 Hz hosts.
+            if (pump.diagTicks == 1 || (pump.diagTicks % 60) == 0) {
+                std::fprintf(stderr,
+                             "[AYAudio] stream.pump id=%u frames=%u peak=%.4f "
+                             "ringR=%u ringW=%u src=%u->%uHz\n",
+                             pump.streamId, pumpFrames, pumpPeak,
+                             ring->availableRead(), ring->availableWrite(),
+                             pump.sourceRate, targetRate);
+                std::fflush(stderr);
+            }
+        }
         ++it;
     }
 }
 
 bool AudioSubSystem::initialize() {
+    if (_engine && _engine->isInitialized()) {
+        return true; // idempotent (Editor Edit-mode lazy init + Play prepare)
+    }
     _engine = std::make_unique<AudioEngine>();
 
     AudioSettings settings{};

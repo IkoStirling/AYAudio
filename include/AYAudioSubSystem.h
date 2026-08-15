@@ -8,9 +8,9 @@
 // is initialized with the Null backend so commands still flow through
 // without touching hardware.
 //
-// v0.5 scope: subsystem lifecycle, Null/Mock backend selection, no editor
-// host yet (Editor uses the same subsystem with a Null backend until its
-// own host loop is wired in v1+).
+// v0.5 scope: subsystem lifecycle, Null/Mock backend selection.
+// Editor registers AudioSubSystem (Miniaudio unless `-no-audio`) and hosts
+// Tools → Audio Editor via shared AudioEditorSession.
 //
 // v1 integration: the host picks a backend via setBackend() *before*
 // initialize() runs. AYApplication does this from registerSubSystems() to
@@ -100,6 +100,8 @@ private:
         uint16_t channels = 0;
         bool loop = false;
         bool eosMarked = false;
+        uint32_t diagTicks = 0;
+        float lastPumpPeak = 0.0f; // peak of most recent pumpStreams fill
         std::vector<float> decodeScratch;
         std::vector<float> pushScratch;
     };

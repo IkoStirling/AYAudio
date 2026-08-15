@@ -1,8 +1,8 @@
 #include <AYAudio.h>
 #include <AYAudioSubSystem.h>
 
-#include <ayio/File.h>
-#include <ayio/Path.h>
+#include <AYIO/File.h>
+#include <AYIO/Path.h>
 
 #include "AYTest.h"
 
@@ -89,6 +89,45 @@ TEST_SUITE(AudioStreamingBgmTests)
             if (a > peak) peak = a;
         }
         CHECK(peak > 0.01f);
+
+        sub.stopStreaming(play);
+        sub.shutdown();
+    }
+
+    // Regression: ambient MP3 beds must produce non-silent stream pump + mix.
+    // Path is optional (dev asset tree); skip when missing.
+    TEST_CASE(EveningWandersMp3StreamAudible) {
+        const char* kPath =
+            "D:/Projects/AliyatRenderer/assets/core/audios/ambient/"
+            "Evening_wanders.mp3";
+        ayt::io::File probe(kPath, ayt::io::File::Mode::BinaryRead);
+        if (!probe.isOpen()) {
+            return; // asset not present in this checkout
+        }
+        probe.close();
+
+        AudioSubSystem sub;
+        CHECK(sub.initialize());
+
+        StreamingPlayback play =
+            sub.playStreamingFile(kPath, AudioBus::Music, false, 1.0f);
+        CHECK(play.stream != InvalidStreamId);
+        CHECK(play.voice != InvalidVoice);
+
+        float maxPeak = 0.0f;
+        for (int i = 0; i < 120; ++i) {
+            sub.update(1.0f / 60.0f);
+            float out[1024]{};
+            sub.engine()->render(out, 512);
+            for (float s : out) {
+                const float a = s < 0.0f ? -s : s;
+                if (a > maxPeak) {
+                    maxPeak = a;
+                }
+            }
+        }
+        // Ambient beds can be quiet, but must not be digital silence.
+        CHECK(maxPeak > 0.001f);
 
         sub.stopStreaming(play);
         sub.shutdown();
