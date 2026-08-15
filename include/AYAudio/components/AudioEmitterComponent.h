@@ -1,11 +1,11 @@
 #pragma once
-// AYAudioEmitterComponent.h — ECS one-shot / looping spatial sound source.
+// AYAudio/components/AYAudio/components/AYAudio/components/AYAudio/components/AudioEmitterComponent.h — ECS one-shot / looping spatial sound source.
 //
 // Driven by AudioEmitterSystem (World priority 600). Requires a sibling
 // Transform for world pose; falls back to spatial.position if absent.
 
-#include <IAYEntity.h>
-#include <AYAudioTypes.h>
+#include <AYEntity/IEntity.h>
+#include <AYAudio/AudioTypes.h>
 
 namespace ayt::audio
 {

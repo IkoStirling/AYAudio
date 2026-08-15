@@ -1,12 +1,12 @@
 #pragma once
-// AYAudioBackendFactory.h - Construct the backend for a given kind
+// AYAudio/AudioBackendFactory.h - Construct the backend for a given kind
 //
 // Game code typically goes through AudioSettings.backend which the engine
 // honors via a factory. We expose the constructors individually so tests
 // and tools can swap backends without going through AudioSettings.
 
-#include <IAudioBackend.h>
-#include <AYAudioTypes.h>
+#include <AYAudio/IAudioBackend.h>
+#include <AYAudio/AudioTypes.h>
 #include <memory>
 
 namespace ayt::audio

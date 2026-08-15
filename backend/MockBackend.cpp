@@ -6,8 +6,8 @@
 //
 // This backend is NOT threadsafe — tests drive it from a single thread.
 
-#include <IAudioBackend.h>
-#include <AYAudioBackendTestAccess.h>
+#include <AYAudio/IAudioBackend.h>
+#include <AYAudio/AudioBackendTestAccess.h>
 
 #include <algorithm>
 #include <cmath>

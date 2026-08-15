@@ -1,8 +1,8 @@
 #pragma once
-// AYAudioEmitterSystem.h — World ISystem @ priority 600.
+// AYAudio/AudioEmitterSystem.h — World ISystem @ priority 600.
 // Syncs AudioListenerComponent / AudioEmitterComponent + Transform → engine.
 
-#include <IAYEntity.h>
+#include <AYEntity/IEntity.h>
 
 namespace ayt::audio
 {

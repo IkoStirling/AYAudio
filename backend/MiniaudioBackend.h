@@ -1,8 +1,8 @@
 #pragma once
 // MiniaudioBackend.h - Real device backend via miniaudio (internal header)
 
-#include <IAudioBackend.h>
-#include <AYAudioEngine.h>
+#include <AYAudio/IAudioBackend.h>
+#include <AYAudio/AudioEngine.h>
 
 struct ma_device;
 struct ma_context;

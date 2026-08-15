@@ -1,5 +1,5 @@
 #pragma once
-// AYAudioBackendTestAccess.h - Test-only inspection API for the Mock backend
+// AYAudio/AudioBackendTestAccess.h - Test-only inspection API for the Mock backend
 //
 // Tests need to read peak amplitude, last-rendered frame count, and a sample
 // of the rendered signal out of MockBackend. We expose that surface here so
@@ -8,7 +8,7 @@
 // header and call the functions below.
 
 #include <cstdint>
-#include <IAudioBackend.h>
+#include <AYAudio/IAudioBackend.h>
 
 namespace ayt::audio
 {

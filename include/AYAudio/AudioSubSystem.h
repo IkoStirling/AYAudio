@@ -1,5 +1,5 @@
 #pragma once
-// AYAudioSubSystem.h - Game-loop subsystem integration for AYAudio
+// AYAudio/AudioSubSystem.h - Game-loop subsystem integration for AYAudio
 //
 // Registered into AYGameLoop on Client builds (see AYApplication/design.md).
 // Owns the AudioEngine instance for the lifetime of the application and
@@ -27,9 +27,9 @@
 
 #include <AYCore.h>
 #include <AYGameLoop.h>
-#include <AYAudioEngine.h>
+#include <AYAudio/AudioEngine.h>
 
-#include <IAudioBackend.h>
+#include <AYAudio/IAudioBackend.h>
 
 // Forward-declare AYResource::IAudio so this header doesn't drag the
 // AYResource include path through every AYAudio consumer. The .cpp is the

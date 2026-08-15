@@ -1,5 +1,5 @@
 #pragma once
-// AYAudioClipRegistry.h - Owns PCM blobs and metadata for registered clips
+// AYAudio/AudioClipRegistry.h - Owns PCM blobs and metadata for registered clips
 //
 // v0 storage: a flat vector indexed by AudioClipId. Clip id 0 is reserved
 // (invalid). Ownership of the PCM blob is transferred on registerClip() and
@@ -11,7 +11,7 @@
 // pointers at command boundaries (after draining the queue).
 
 #include <AYCore.h>
-#include <AYAudioTypes.h>
+#include <AYAudio/AudioTypes.h>
 #include <cstdint>
 #include <vector>
 

@@ -1,5 +1,5 @@
 #pragma once
-// AYAudioStreamRingBuffer.h - SPSC interleaved F32 ring buffer for streaming PCM
+// AYAudio/AudioStreamRingBuffer.h - SPSC interleaved F32 ring buffer for streaming PCM
 //
 // v1.5: a single-producer single-consumer ring buffer that owns the
 // in-flight PCM chunks for a streaming voice. The producer (resource /

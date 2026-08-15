@@ -1,5 +1,5 @@
 #pragma once
-// AYAudioSpatializer.h - Per-voice 3D / pan gain computation
+// AYAudio/AudioSpatializer.h - Per-voice 3D / pan gain computation
 //
 // Pure functions (no state) that compute the spatial gain scalars for one
 // voice. Returned values are applied by the mixer when summing into the
@@ -17,7 +17,7 @@
 // Low-pass filtering (occlusion cutoff, air absorption) is v2.
 
 #include <AYCore.h>
-#include <AYAudioTypes.h>
+#include <AYAudio/AudioTypes.h>
 #include <cstdint>
 
 namespace ayt::audio

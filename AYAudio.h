@@ -2,17 +2,17 @@
 // AYAudio.h - Module umbrella include for AYAudio
 //
 // Convenience header that pulls in the public AYAudio surface. Game code
-// can simply `#include <AYAudio.h>` and get every type / class needed to
+// can simply `#include <AYResource/assetsImpl/Audio.h>` and get every type / class needed to
 // play sounds.
 
-#include <AYAudioTypes.h>
-#include <AYAudioCommandQueue.h>
-#include <AYAudioMixer.h>
-#include <AYAudioSpatializer.h>
-#include <AYAudioClipRegistry.h>
-#include <AYAudioEngine.h>
-#include <AYAudioSubSystem.h>
-#include <AYAudioEmitterSystem.h>
-#include <AYAudioBackendFactory.h>
-#include <components/AYAudioEmitterComponent.h>
-#include <components/AYAudioListenerComponent.h>
+#include <AYAudio/AudioTypes.h>
+#include <AYAudio/AudioCommandQueue.h>
+#include <AYAudio/AudioMixer.h>
+#include <AYAudio/AudioSpatializer.h>
+#include <AYAudio/AudioClipRegistry.h>
+#include <AYAudio/AudioEngine.h>
+#include <AYAudio/AudioSubSystem.h>
+#include <AYAudio/AudioEmitterSystem.h>
+#include <AYAudio/AudioBackendFactory.h>
+#include <AYAudio/components/AudioEmitterComponent.h>
+#include <AYAudio/components/AudioListenerComponent.h>

@@ -1,5 +1,5 @@
 #pragma once
-// IAudioBackend.h - Audio device backend abstraction
+// AYAudio/IAudioBackend.h - Audio device backend abstraction
 //
 // AYAudio (v0.5) uses miniaudio as the primary device backend. This interface
 // isolates the engine core from any particular audio API so:

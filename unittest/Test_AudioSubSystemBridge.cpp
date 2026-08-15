@@ -5,10 +5,10 @@
 // verifies the bridge correctly maps the asset fields into AudioClipDesc,
 // registers a clip, and rejects unsupported bit depths / channel counts.
 
-#include <AYAudio.h>
-#include <AYAudioSubSystem.h>
+#include <AYResource/assetsImpl/Audio.h>
+#include <AYAudio/AudioSubSystem.h>
 
-#include <IAYAudio.h>   // ayt::resource::IAudio
+#include <AYResource/assetsDefs/IAudio.h>   // ayt::resource::IAudio
 #include <AYMath/MathDefs.h> // brings UInt8/UInt32/UInt64/Float32 into global ns
 
 #include "AYTest.h"

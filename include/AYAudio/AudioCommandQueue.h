@@ -1,5 +1,5 @@
 #pragma once
-// AYAudioCommandQueue.h - Lock-free SPSC command queue (game→audio thread)
+// AYAudio/AudioCommandQueue.h - Lock-free SPSC command queue (game→audio thread)
 //
 // v0 implementation: single-producer single-consumer ring buffer of
 // AudioCommand records. The producer is the game thread (calls in
@@ -14,7 +14,7 @@
 // keeps the surface small for v0 review.
 
 #include <AYCore.h>
-#include <AYAudioTypes.h>
+#include <AYAudio/AudioTypes.h>
 #include <atomic>
 #include <cstdint>
 #include <vector>

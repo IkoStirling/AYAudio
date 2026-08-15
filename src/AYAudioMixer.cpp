@@ -1,4 +1,4 @@
-#include <AYAudioMixer.h>
+#include <AYAudio/AudioMixer.h>
 
 #include <algorithm>
 #include <cassert>

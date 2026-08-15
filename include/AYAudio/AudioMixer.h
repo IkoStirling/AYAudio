@@ -1,5 +1,5 @@
 #pragma once
-// AYAudioMixer.h - Bus mixer + per-voice gain application
+// AYAudio/AudioMixer.h - Bus mixer + per-voice gain application
 //
 // Mixer applies user gains (voice volume * bus gain * master gain) and
 // accumulates voices into the interleaved float32 output buffer. The mixer
@@ -14,7 +14,7 @@
 //   - Custom attenuation curves + doppler (in spatializer, not here)
 
 #include <AYCore.h>
-#include <AYAudioTypes.h>
+#include <AYAudio/AudioTypes.h>
 #include <array>
 #include <cstdint>
 #include <vector>

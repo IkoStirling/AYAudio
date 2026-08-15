@@ -1,0 +1,195 @@
+{
+  "type": "VBox",
+  "id": "audio_editor_root",
+  "size": { "w": 960, "h": 640 },
+  "spacing": 4,
+  "padding": { "left": 0, "top": 0, "right": 0, "bottom": 8 },
+  "children": [
+    {
+      "type": "HBox",
+      "id": "toolbar_title",
+      "size": { "h": 36 },
+      "spacing": 8,
+      "padding": { "left": 10, "top": 6, "right": 10, "bottom": 4 },
+      "children": [
+        { "type": "TextLabel", "id": "lbl_title", "text": "AYAudio Editor", "size": { "w": 160, "h": 24 }, "slot": { "width": 160 } },
+        { "type": "TextLabel", "id": "lbl_status", "text": "Ready — Play 440 to check device", "size": { "w": 720, "h": 24 } }
+      ]
+    },
+    {
+      "type": "HBox",
+      "id": "row_transport",
+      "size": { "h": 40 },
+      "spacing": 6,
+      "padding": { "left": 10, "top": 4, "right": 10, "bottom": 4 },
+      "children": [
+        { "type": "TextLabel", "id": "lbl_transport", "text": "Transport", "size": { "w": 72, "h": 24 }, "slot": { "width": 72 } },
+        { "type": "Button", "id": "btn_play_440", "text": "Play 440", "size": { "w": 80, "h": 28 }, "slot": { "width": 80 } },
+        { "type": "Button", "id": "btn_play_880", "text": "Play 880", "size": { "w": 80, "h": 28 }, "slot": { "width": 80 } },
+        { "type": "Button", "id": "btn_loop_220", "text": "Loop 220", "size": { "w": 80, "h": 28 }, "slot": { "width": 80 } },
+        { "type": "Button", "id": "btn_stop_all", "text": "Stop All", "size": { "w": 80, "h": 28 }, "slot": { "width": 80 } },
+        { "type": "Button", "id": "btn_pause", "text": "Pause", "size": { "w": 72, "h": 28 }, "slot": { "width": 72 } }
+      ]
+    },
+    {
+      "type": "HBox",
+      "id": "row_stream",
+      "size": { "h": 40 },
+      "spacing": 6,
+      "padding": { "left": 10, "top": 4, "right": 10, "bottom": 4 },
+      "children": [
+        { "type": "TextLabel", "id": "lbl_stream", "text": "Stream", "size": { "w": 72, "h": 24 }, "slot": { "width": 72 } },
+        { "type": "Button", "id": "btn_open_stream", "text": "Open Stream…", "size": { "w": 120, "h": 28 }, "slot": { "width": 120 } },
+        { "type": "Button", "id": "btn_stop_stream", "text": "Stop Stream", "size": { "w": 100, "h": 28 }, "slot": { "width": 100 } },
+        { "type": "TextLabel", "id": "lbl_stream_track", "text": "Track: (none)", "size": { "w": 480, "h": 24 } }
+      ]
+    },
+    {
+      "type": "HBox",
+      "id": "row_spatial",
+      "size": { "h": 40 },
+      "spacing": 6,
+      "padding": { "left": 10, "top": 4, "right": 10, "bottom": 4 },
+      "children": [
+        { "type": "TextLabel", "id": "lbl_spatial", "text": "Spatial", "size": { "w": 72, "h": 24 }, "slot": { "width": 72 } },
+        { "type": "Button", "id": "btn_spatial_l", "text": "L", "size": { "w": 48, "h": 28 }, "slot": { "width": 48 } },
+        { "type": "Button", "id": "btn_spatial_c", "text": "C", "size": { "w": 48, "h": 28 }, "slot": { "width": 48 } },
+        { "type": "Button", "id": "btn_spatial_r", "text": "R", "size": { "w": 48, "h": 28 }, "slot": { "width": 48 } },
+        { "type": "Button", "id": "btn_duck", "text": "Duck Music", "size": { "w": 100, "h": 28 }, "slot": { "width": 100 } },
+        { "type": "Button", "id": "btn_reverb_preset", "text": "Reverb Preset", "size": { "w": 110, "h": 28 }, "slot": { "width": 110 } }
+      ]
+    },
+    {
+      "type": "TextLabel",
+      "id": "lbl_buses_hdr",
+      "text": "Mixer channels (bus gains)",
+      "size": { "h": 22 },
+      "padding": { "left": 10, "top": 8, "right": 10, "bottom": 0 }
+    },
+    {
+      "type": "VBox",
+      "id": "col_buses",
+      "size": { "h": 280 },
+      "spacing": 6,
+      "padding": { "left": 10, "top": 4, "right": 10, "bottom": 4 },
+      "children": [
+        {
+          "type": "HBox",
+          "id": "row_master",
+          "size": { "h": 40 },
+          "spacing": 10,
+          "padding": { "left": 8, "top": 6, "right": 8, "bottom": 6 },
+          "children": [
+            { "type": "TextLabel", "id": "lbl_master", "text": "Master", "size": { "w": 96, "h": 28 }, "slot": { "width": 96 } },
+            { "type": "Slider", "id": "sld_master", "min": 0, "max": 100, "value": 100, "size": { "w": 0, "h": 28 } },
+            { "type": "TextLabel", "id": "val_master", "text": "100", "size": { "w": 48, "h": 28 }, "slot": { "width": 48 } }
+          ]
+        },
+        {
+          "type": "HBox",
+          "id": "row_music",
+          "size": { "h": 40 },
+          "spacing": 10,
+          "padding": { "left": 8, "top": 6, "right": 8, "bottom": 6 },
+          "children": [
+            { "type": "TextLabel", "id": "lbl_music", "text": "Music", "size": { "w": 96, "h": 28 }, "slot": { "width": 96 } },
+            { "type": "Slider", "id": "sld_music", "min": 0, "max": 100, "value": 100, "size": { "w": 0, "h": 28 } },
+            { "type": "TextLabel", "id": "val_music", "text": "100", "size": { "w": 48, "h": 28 }, "slot": { "width": 48 } }
+          ]
+        },
+        {
+          "type": "HBox",
+          "id": "row_sfx",
+          "size": { "h": 40 },
+          "spacing": 10,
+          "padding": { "left": 8, "top": 6, "right": 8, "bottom": 6 },
+          "children": [
+            { "type": "TextLabel", "id": "lbl_sfx", "text": "SFX", "size": { "w": 96, "h": 28 }, "slot": { "width": 96 } },
+            { "type": "Slider", "id": "sld_sfx", "min": 0, "max": 100, "value": 100, "size": { "w": 0, "h": 28 } },
+            { "type": "TextLabel", "id": "val_sfx", "text": "100", "size": { "w": 48, "h": 28 }, "slot": { "width": 48 } }
+          ]
+        },
+        {
+          "type": "HBox",
+          "id": "row_reverb",
+          "size": { "h": 40 },
+          "spacing": 10,
+          "padding": { "left": 8, "top": 6, "right": 8, "bottom": 6 },
+          "children": [
+            { "type": "TextLabel", "id": "lbl_reverb", "text": "Reverb Ret", "size": { "w": 96, "h": 28 }, "slot": { "width": 96 } },
+            { "type": "Slider", "id": "sld_reverb", "min": 0, "max": 100, "value": 15, "size": { "w": 0, "h": 28 } },
+            { "type": "TextLabel", "id": "val_reverb", "text": "15", "size": { "w": 48, "h": 28 }, "slot": { "width": 48 } }
+          ]
+        },
+        {
+          "type": "HBox",
+          "id": "row_timescale",
+          "size": { "h": 40 },
+          "spacing": 10,
+          "padding": { "left": 8, "top": 6, "right": 8, "bottom": 6 },
+          "children": [
+            { "type": "TextLabel", "id": "lbl_timescale", "text": "TimeScale", "size": { "w": 96, "h": 28 }, "slot": { "width": 96 } },
+            { "type": "Slider", "id": "sld_timescale", "min": 25, "max": 200, "value": 100, "size": { "w": 0, "h": 28 } },
+            { "type": "TextLabel", "id": "val_timescale", "text": "1.00", "size": { "w": 48, "h": 28 }, "slot": { "width": 48 } }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "TextLabel",
+      "id": "lbl_tracks_hdr",
+      "text": "Active tracks",
+      "size": { "h": 22 },
+      "padding": { "left": 10, "top": 6, "right": 10, "bottom": 0 }
+    },
+    {
+      "type": "VBox",
+      "id": "col_tracks",
+      "size": { "h": 120 },
+      "spacing": 4,
+      "padding": { "left": 10, "top": 4, "right": 10, "bottom": 4 },
+      "children": [
+        {
+          "type": "HBox",
+          "id": "track_row_0",
+          "size": { "h": 28 },
+          "spacing": 8,
+          "children": [
+            { "type": "TextLabel", "id": "track_name_0", "text": "—", "size": { "w": 200, "h": 24 }, "slot": { "width": 200 } },
+            { "type": "TextLabel", "id": "track_info_0", "text": "", "size": { "w": 0, "h": 24 } }
+          ]
+        },
+        {
+          "type": "HBox",
+          "id": "track_row_1",
+          "size": { "h": 28 },
+          "spacing": 8,
+          "children": [
+            { "type": "TextLabel", "id": "track_name_1", "text": "—", "size": { "w": 200, "h": 24 }, "slot": { "width": 200 } },
+            { "type": "TextLabel", "id": "track_info_1", "text": "", "size": { "w": 0, "h": 24 } }
+          ]
+        },
+        {
+          "type": "HBox",
+          "id": "track_row_2",
+          "size": { "h": 28 },
+          "spacing": 8,
+          "children": [
+            { "type": "TextLabel", "id": "track_name_2", "text": "—", "size": { "w": 200, "h": 24 }, "slot": { "width": 200 } },
+            { "type": "TextLabel", "id": "track_info_2", "text": "", "size": { "w": 0, "h": 24 } }
+          ]
+        },
+        {
+          "type": "HBox",
+          "id": "track_row_3",
+          "size": { "h": 28 },
+          "spacing": 8,
+          "children": [
+            { "type": "TextLabel", "id": "track_name_3", "text": "—", "size": { "w": 200, "h": 24 }, "slot": { "width": 200 } },
+            { "type": "TextLabel", "id": "track_info_3", "text": "", "size": { "w": 0, "h": 24 } }
+          ]
+        }
+      ]
+    }
+  ]
+}

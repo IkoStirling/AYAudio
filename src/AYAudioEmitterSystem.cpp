@@ -1,15 +1,15 @@
 // AYAudioEmitterSystem.cpp — sync ECS listener/emitters to AudioEngine.
 
-#include <AYAudioEmitterSystem.h>
+#include <AYAudio/AudioEmitterSystem.h>
 
-#include <AYAudioEngine.h>
-#include <AYAudioSubSystem.h>
+#include <AYAudio/AudioEngine.h>
+#include <AYAudio/AudioSubSystem.h>
 #include <AYEntity.h>
-#include <AYWorld.h>
+#include <AYEntity/World.h>
 
-#include <components/AYAudioEmitterComponent.h>
-#include <components/AYAudioListenerComponent.h>
-#include <components/AYTransformComponent.h>
+#include <AYAudio/components/AudioEmitterComponent.h>
+#include <AYAudio/components/AudioListenerComponent.h>
+#include <AYEntity/components/TransformComponent.h>
 
 #include <cstring>
 

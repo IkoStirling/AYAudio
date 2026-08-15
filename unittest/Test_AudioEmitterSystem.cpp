@@ -1,7 +1,7 @@
-#include <AYAudio.h>
+#include <AYResource/assetsImpl/Audio.h>
 #include <AYEntity.h>
-#include <AYWorld.h>
-#include <components/AYTransformComponent.h>
+#include <AYEntity/World.h>
+#include <AYEntity/components/TransformComponent.h>
 
 #include "AYTest.h"
 

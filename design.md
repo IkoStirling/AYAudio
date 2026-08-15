@@ -143,7 +143,7 @@ No OpenAL-style context on game thread.
               (buses: Master / Music / Sfx / Ui / Voice)
 ```
 
-`AYAudio` **must not** include `assetsImpl/AYAudio.h` in **public** headers exposed to gameplay. Registration API takes plain PCM descriptor:
+`AYAudio` **must not** include `AYResource/assetsImpl/Audio.h` in **public** headers exposed to gameplay. Registration API takes plain PCM descriptor:
 
 ```cpp
 struct AudioClipDesc {
@@ -442,11 +442,11 @@ AYRuntime/AYAudio/
 ├── CMakeLists.txt
 ├── include/
 │   ├── AYAudio.h
-│   ├── AYAudioTypes.h
-│   ├── AYAudioEngine.h
-│   └── AYAudioSubSystem.h
+│   ├── AYAudio/AudioTypes.h
+│   ├── AYAudio/AudioEngine.h
+│   └── AYAudio/AudioSubSystem.h
 ├── interface/
-│   └── IAudioBackend.h
+│   └── AYAudio/IAudioBackend.h
 ├── backend/
 │   ├── MiniaudioBackend.cpp
 │   ├── NullBackend.cpp

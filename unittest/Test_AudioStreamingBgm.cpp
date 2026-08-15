@@ -1,5 +1,5 @@
-#include <AYAudio.h>
-#include <AYAudioSubSystem.h>
+#include <AYResource/assetsImpl/Audio.h>
+#include <AYAudio/AudioSubSystem.h>
 
 #include <AYIO/File.h>
 #include <AYIO/Path.h>

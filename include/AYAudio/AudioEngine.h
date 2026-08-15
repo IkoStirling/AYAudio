@@ -1,5 +1,5 @@
 #pragma once
-// AYAudioEngine.h - Runtime presentation audio engine (public API)
+// AYAudio/AudioEngine.h - Runtime presentation audio engine (public API)
 //
 // AYAudioEngine is the single entry point gameplay code uses to drive audio.
 // It owns the command queue, mixer, spatializer, and clip registry, and
@@ -20,13 +20,13 @@
 //     but must only be used by the backend's render callback.
 
 #include <AYCore.h>
-#include <AYAudioTypes.h>
-#include <AYAudioCommandQueue.h>
-#include <AYAudioMixer.h>
-#include <AYAudioSpatializer.h>
-#include <AYAudioClipRegistry.h>
+#include <AYAudio/AudioTypes.h>
+#include <AYAudio/AudioCommandQueue.h>
+#include <AYAudio/AudioMixer.h>
+#include <AYAudio/AudioSpatializer.h>
+#include <AYAudio/AudioClipRegistry.h>
 
-#include <IAudioBackend.h>
+#include <AYAudio/IAudioBackend.h>
 
 #include <array>
 #include <atomic>

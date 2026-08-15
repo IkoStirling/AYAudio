@@ -1,4 +1,4 @@
-#include <AYAudioStreamRingBuffer.h>
+#include <AYAudio/AudioStreamRingBuffer.h>
 
 #include <algorithm>
 #include <cstring>

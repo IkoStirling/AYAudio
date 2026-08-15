@@ -1,4 +1,4 @@
-#include <AYAudioSpatializer.h>
+#include <AYAudio/AudioSpatializer.h>
 
 #include <algorithm>
 #include <cmath>

@@ -1,8 +1,8 @@
-#include <AYAudioEngine.h>
+#include <AYAudio/AudioEngine.h>
 
-#include <AYAudioBackendFactory.h>
-#include <AYAudioSpatializer.h>
-#include <AYAudioStreamRingBuffer.h>
+#include <AYAudio/AudioBackendFactory.h>
+#include <AYAudio/AudioSpatializer.h>
+#include <AYAudio/AudioStreamRingBuffer.h>
 
 #include <algorithm>
 #include <atomic>

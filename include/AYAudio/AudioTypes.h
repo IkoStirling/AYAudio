@@ -1,5 +1,5 @@
 #pragma once
-// AYAudioTypes.h - Shared audio value types
+// AYAudio/AudioTypes.h - Shared audio value types
 //
 // These types are used by both the engine and the backends. They are pure
 // POD/aggregate types with no engine dependencies other than <cstdint> and

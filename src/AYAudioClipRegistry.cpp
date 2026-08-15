@@ -1,4 +1,4 @@
-#include <AYAudioClipRegistry.h>
+#include <AYAudio/AudioClipRegistry.h>
 
 #include <cstring>
 

@@ -1,11 +1,11 @@
 #pragma once
-// AYAudioListenerComponent.h — ECS audio listener (usually the camera / player).
+// AYAudio/components/AYAudio/components/AYAudio/components/AYAudio/components/AudioListenerComponent.h — ECS audio listener (usually the camera / player).
 //
 // AudioEmitterSystem picks the first primary listener each tick and pushes
 // pose + hrtfEnabled into AudioEngine::setListener.
 
-#include <IAYEntity.h>
-#include <AYAudioTypes.h>
+#include <AYEntity/IEntity.h>
+#include <AYAudio/AudioTypes.h>
 
 namespace ayt::audio
 {

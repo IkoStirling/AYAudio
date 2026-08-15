@@ -1,5 +1,5 @@
-#include <AYAudio.h>
-#include <AYAudioBackendTestAccess.h>
+#include <AYResource/assetsImpl/Audio.h>
+#include <AYAudio/AudioBackendTestAccess.h>
 #include "AYTest.h"
 
 #include <vector>

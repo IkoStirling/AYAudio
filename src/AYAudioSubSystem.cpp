@@ -1,13 +1,13 @@
-#include <AYAudioSubSystem.h>
+#include <AYAudio/AudioSubSystem.h>
 
-#include <AYAudioBackendFactory.h>
-#include <AYAudioClipRegistry.h>
-#include <AYAudioEmitterSystem.h>
-#include <AYAudioStreamRingBuffer.h>
-#include <AYWorld.h>
+#include <AYAudio/AudioBackendFactory.h>
+#include <AYAudio/AudioClipRegistry.h>
+#include <AYAudio/AudioEmitterSystem.h>
+#include <AYAudio/AudioStreamRingBuffer.h>
+#include <AYEntity/World.h>
 
-#include <IAYAudio.h>   // ayt::resource::IAudio
-#include <Converter/AudioDecoder.h>
+#include <AYResource/assetsDefs/IAudio.h>   // ayt::resource::IAudio
+#include <AYResource/Converter/AudioDecoder.h>
 
 #include <algorithm>
 #include <cmath>
