@@ -5,7 +5,7 @@
 // (no device), pushes PCM frames into a streaming ring, plays the
 // voice, and inspects the rendered output buffer.
 
-#include <AYResource/assetsImpl/Audio.h>
+#include <AYAudio.h>
 #include <AYAudio/AudioStreamRingBuffer.h>
 
 #include "AYTest.h"

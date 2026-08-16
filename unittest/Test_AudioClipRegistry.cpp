@@ -1,4 +1,4 @@
-#include <AYResource/assetsImpl/Audio.h>
+#include <AYAudio.h>
 #include "AYTest.h"
 
 using namespace ayt::audio;

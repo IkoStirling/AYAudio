@@ -1,4 +1,4 @@
-#include <AYResource/assetsImpl/Audio.h>
+#include <AYAudio.h>
 #include <AYAudio/AudioBackendTestAccess.h>
 #include "AYTest.h"
 

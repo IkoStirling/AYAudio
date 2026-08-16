@@ -4,7 +4,7 @@
 // bridges the producer (decoder / loader thread) and the audio thread
 // consumer (renderVoiceStream).
 
-#include <AYResource/assetsImpl/Audio.h>
+#include <AYAudio.h>
 #include <AYAudio/AudioStreamRingBuffer.h>
 
 #include "AYTest.h"
