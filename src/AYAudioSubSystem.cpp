@@ -77,6 +77,9 @@ AudioSubSystem::AudioSubSystem() {
     _descriptor.name = "Audio";
     _descriptor.basePriority = 600; // see AYEntity/design.md: 600+ reserved for Audio
     _descriptor.timeType = ayt::game::SubSystemDescriptor::TimeType::Unscaled;
+    _descriptor.phases = ayt::game::phaseBit(ayt::game::FramePhase::Presentation);
+    _descriptor.clock = ayt::game::ClockDomain::Unscaled;
+    _descriptor.phasePriority = 600;
 }
 
 AudioSubSystem::~AudioSubSystem() {
