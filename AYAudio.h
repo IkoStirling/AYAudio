@@ -11,6 +11,7 @@
 #include <AYAudio/AudioSpatializer.h>
 #include <AYAudio/AudioClipRegistry.h>
 #include <AYAudio/AudioEngine.h>
+#include <AYAudio/AudioComponents.h>
 #include <AYAudio/AudioSubSystem.h>
 #include <AYAudio/AudioEmitterSystem.h>
 #include <AYAudio/AudioBackendFactory.h>

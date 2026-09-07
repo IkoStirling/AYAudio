@@ -11,12 +11,14 @@ set(SRC_FILES
     src/AYAudioBackendFactory.cpp
     src/AYAudioClipRegistry.cpp
     src/AYAudioCommandQueue.cpp
+    src/AYAudioComponents.cpp
     src/AYAudioEngine.cpp
     src/AYAudioEmitterSystem.cpp
     src/AYAudioMixer.cpp
     src/AYAudioSpatializer.cpp
     src/AYAudioStreamRingBuffer.cpp
     src/AYAudioSubSystem.cpp
+    src/AYAudioRuntimeModule.cpp
 )
 
 # Backends. Null + Mock are CPU-only; MiniaudioBackend talks to the
@@ -41,12 +43,14 @@ set(HEAD_FILES
     include/AYAudio/AudioBackendTestAccess.h
     include/AYAudio/AudioClipRegistry.h
     include/AYAudio/AudioCommandQueue.h
+    include/AYAudio/AudioComponents.h
     include/AYAudio/AudioEngine.h
     include/AYAudio/AudioEmitterSystem.h
     include/AYAudio/AudioMixer.h
     include/AYAudio/AudioSpatializer.h
     include/AYAudio/AudioStreamRingBuffer.h
     include/AYAudio/AudioSubSystem.h
+    include/AYAudio/AudioRuntimeModule.h
     include/AYAudio/components/AudioEmitterComponent.h
     include/AYAudio/components/AudioListenerComponent.h
     interface/AYAudio/IAudioBackend.h
@@ -89,6 +93,7 @@ target_include_directories(${MODULE_NAME} PRIVATE
 )
 
 target_link_libraries(${MODULE_NAME} PUBLIC
+    AY::Module
     AYCore
     AYMath
     AYGameLoop
@@ -100,7 +105,7 @@ target_link_libraries(${MODULE_NAME} PUBLIC
     AYResource
     # ECS AudioEmitter/Listener (v2.2). AYEntity does not link AYAudio,
     # so this edge is one-way.
-    AYEntity
+    AYEntityCore
 )
 
 # Windows native deps for miniaudio (WASAPI / WinMM). Link system libs

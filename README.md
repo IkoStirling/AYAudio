@@ -15,6 +15,12 @@ reverb + doppler + custom attenuation curves + AYResource PCM bridge.
 - **Gallery:** `AYAudio_Gallery` — standalone Win32 mixer / playback smoke UI.
 - **Audio Editor:** `AYAudio_AudioEditor` — AYUI mixer desk (dual-host with AYEditor Tools).
 
+Default Client / Editor hosts install `AudioSubSystem` through
+`AudioRuntimeModule` (`AYAudio.Runtime`). The module accepts a backend factory,
+so a host may select Miniaudio, Null, or a custom backend without bypassing the
+module graph. The default `-no-audio` option omits the module entirely; direct
+subsystem construction remains available to demos and tests.
+
 ## Gallery
 
 ```bat

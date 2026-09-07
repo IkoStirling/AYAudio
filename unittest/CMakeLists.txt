@@ -19,6 +19,7 @@ add_executable(${TEST_TARGET}
     Test_AudioSampleRateAndHrtf.cpp
     Test_AudioStreamingBgm.cpp
     Test_AudioEmitterSystem.cpp
+    Test_AudioRuntimeModule.cpp
 )
 
 target_link_libraries(${TEST_TARGET} PRIVATE

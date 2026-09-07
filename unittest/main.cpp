@@ -9,8 +9,15 @@
 
 #include "AYTest.h"
 
+#include <AYAudio/AudioComponents.h>
+#include <AYEntity/EntityModule.h>
+
 int main(int argc, char* argv[]) {
-    (void)argc;
-    (void)argv;
+    ayt::entity::registerEntityComponents();
+    ayt::audio::registerAudioComponents();
+
+    if (argc > 1) {
+        return ayt::test::runSuite(argv[1]);
+    }
     return ayt::test::runAllTests("AYAudio");
 }
