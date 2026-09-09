@@ -808,6 +808,28 @@ void AudioEngine::setVoicePitch(VoiceHandle voice, float pitch) {
     }
 }
 
+bool AudioEngine::setVoicePositionFrames(VoiceHandle voice,
+                                         uint64_t positionFrames) {
+    if (!_initialized || voice == InvalidVoice) return false;
+    const uint32_t idx = voice - 1;
+    if (idx >= _voices.size()) return false;
+    VoiceRuntime& slot = _voices[idx];
+    if (!slot.playing || slot.sourceKind != VoiceSourceKind::Clip) return false;
+    const ClipSlot* clip = _clips.find(slot.clip);
+    if (clip == nullptr || clip->desc.frameCount == 0u) return false;
+    const uint64_t clamped = std::min<uint64_t>(
+        positionFrames, static_cast<uint64_t>(clip->desc.frameCount - 1u));
+
+    AudioCommand cmd{};
+    cmd.type = AudioCommandType::SetVoicePosition;
+    cmd.voice = voice;
+    cmd.voiceId = slot.voiceId;
+    cmd.positionFrames = clamped;
+    _commands.tryPush(cmd);
+    slot.positionFrames = clamped;
+    return true;
+}
+
 void AudioEngine::setVoiceSpatial(VoiceHandle voice, const SpatializationParams& spatial) {
     if (!_initialized || voice == InvalidVoice) {
         return;
@@ -1402,6 +1424,32 @@ void AudioEngine::_applyCommand(const AudioCommand& cmd) {
             const uint32_t vi = cmd.voice - 1;
             if (vi < _voices.size()) {
                 _voices[vi].pitch = cmd.scalar;
+            }
+            break;
+        }
+        case AudioCommandType::SetVoicePosition: {
+            uint32_t idx;
+            if (cmd.voiceId != 0 && _findVoiceById(cmd.voiceId, idx)) {
+                VoiceRuntime& voice = _voices[idx];
+                if (voice.sourceKind != VoiceSourceKind::Clip) break;
+                const ClipSlot* clip = _clips.find(voice.clip);
+                if (clip != nullptr && clip->desc.frameCount != 0u) {
+                    voice.positionFrames = std::min<uint64_t>(
+                        cmd.positionFrames,
+                        static_cast<uint64_t>(clip->desc.frameCount - 1u));
+                }
+                break;
+            }
+            if (cmd.voice == InvalidVoice) break;
+            const uint32_t vi = cmd.voice - 1;
+            if (vi < _voices.size()
+                && _voices[vi].sourceKind == VoiceSourceKind::Clip) {
+                const ClipSlot* clip = _clips.find(_voices[vi].clip);
+                if (clip != nullptr && clip->desc.frameCount != 0u) {
+                    _voices[vi].positionFrames = std::min<uint64_t>(
+                        cmd.positionFrames,
+                        static_cast<uint64_t>(clip->desc.frameCount - 1u));
+                }
             }
             break;
         }

@@ -28,6 +28,7 @@ enum class AudioCommandType : uint8_t {
     StopAll,
     SetVoiceVolume,
     SetVoicePitch,
+    SetVoicePosition,
     SetVoiceSpatialParams,
     SetBusGain,
     SetMasterGain,
@@ -68,6 +69,7 @@ struct AudioCommand {
     // slot the game thread already populated via _findVoiceById() instead of
     // re-allocating a fresh slot. 0 means "no identity" (RegisterClip, etc.).
     uint64_t voiceId = 0;
+    uint64_t positionFrames = 0; // SetVoicePosition
     // Monotonic clip identity (RegisterClip). Lets the audio thread
     // distinguish "this is a re-register of clip N" from "register a new
     // clip". Same identity game-thread and audio-thread paths.

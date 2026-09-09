@@ -72,6 +72,9 @@ public:
 
     void setVoiceVolume(VoiceHandle voice, float volume);
     void setVoicePitch(VoiceHandle voice, float pitch);
+    // Seek a clip-backed voice to an exact source frame. Values beyond the
+    // clip are clamped to its final frame; stream voices cannot be sought.
+    bool setVoicePositionFrames(VoiceHandle voice, uint64_t positionFrames);
     void setVoiceSpatial(VoiceHandle voice, const SpatializationParams& spatial);
 
     // ===== Bus / master =====

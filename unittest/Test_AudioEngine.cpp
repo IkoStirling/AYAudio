@@ -96,6 +96,19 @@ TEST_SUITE(AudioEngineTests)
         engine.shutdown();
     }
 
+    TEST_CASE(ClipVoiceCanSeekForEditorTimelineSync) {
+        AudioEngine engine;
+        engine.initialize(defaultSettings());
+        AudioClipDesc desc = makeSineClip(48000);
+        const AudioClipId clip = engine.registerClip(desc);
+        const VoiceHandle voice = engine.play(clip, AudioBus::Music);
+        CHECK(engine.setVoicePositionFrames(voice, 24000u));
+        CHECK(engine.voicePositionFrames(voice) == 24000u);
+        CHECK(engine.setVoicePositionFrames(voice, 96000u));
+        CHECK(engine.voicePositionFrames(voice) == 47999u);
+        engine.shutdown();
+    }
+
     TEST_CASE(StopAllClearsActiveVoices) {
         AudioEngine engine;
         engine.initialize(defaultSettings());
