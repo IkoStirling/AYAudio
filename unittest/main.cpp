@@ -13,11 +13,11 @@
 #include <AYEntity/EntityModule.h>
 
 int main(int argc, char* argv[]) {
+    ayt::test::RunOptions options;
+    bool help = false;
+    if (ayt::test::parseRunOptions(argc, argv, options, help)) return 2;
+    if (help || options.list) return ayt::test::runTests("AYAudio", argc, argv);
     ayt::entity::registerEntityComponents();
     ayt::audio::registerAudioComponents();
-
-    if (argc > 1) {
-        return ayt::test::runSuite(argv[1]);
-    }
-    return ayt::test::runAllTests("AYAudio");
+    return ayt::test::runTests("AYAudio", options);
 }

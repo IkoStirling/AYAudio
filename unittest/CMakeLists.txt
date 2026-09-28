@@ -48,4 +48,7 @@ target_compile_options(${TEST_TARGET} PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>: -Wall -Wextra -Wpedantic>
 )
 
-ay_add_test(${TEST_TARGET})
+ay_add_test_tiers(${TEST_TARGET} PREFIX audio DEFAULT_TIER integration
+    FAST_SUITES AudioCommandQueueTests AudioClipRegistryTests
+                AudioSpatializerTests AudioHrtfTests AudioStreamRingBufferTests
+    TIMEOUT 120 RUN_SERIAL)

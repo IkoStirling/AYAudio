@@ -32,8 +32,7 @@ TEST_SUITE(MiniaudioBackendTests)
         auto backend = makeMiniaudioBackend();
         CHECK(backend != nullptr);
         if (!backend->start(defaultDeviceInfo())) {
-            ::printf("  [SKIP] StartStopRoundTrip: no playback device\n");
-            return;
+            SKIP_TEST("No playback device available for Miniaudio");
         }
         CHECK(backend->isRealDevice());
         backend->stop();
@@ -44,8 +43,7 @@ TEST_SUITE(MiniaudioBackendTests)
         auto backend = makeMiniaudioBackend();
         CHECK(backend != nullptr);
         if (!backend->start(defaultDeviceInfo())) {
-            ::printf("  [SKIP] DoubleStartIsIdempotent: no playback device\n");
-            return;
+            SKIP_TEST("No playback device available for Miniaudio");
         }
         CHECK(backend->start(defaultDeviceInfo()));
         backend->stop();
@@ -64,9 +62,7 @@ TEST_SUITE(MiniaudioBackendTests)
         AudioEngine engine;
         engine.setBackend(makeMiniaudioBackend());
         if (!engine.initialize(settings)) {
-            ::printf("  [SKIP] AudioEnginePlaysThroughMiniaudioBackend: "
-                     "device open failed\n");
-            return;
+            SKIP_TEST("Miniaudio playback device open failed");
         }
         CHECK(engine.isInitialized());
         CHECK(engine.backend() != nullptr);

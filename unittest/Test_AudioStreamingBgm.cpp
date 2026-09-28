@@ -102,7 +102,7 @@ TEST_SUITE(AudioStreamingBgmTests)
             "Evening_wanders.mp3";
         ayt::io::File probe(kPath, ayt::io::File::Mode::BinaryRead);
         if (!probe.isOpen()) {
-            return; // asset not present in this checkout
+            SKIP_TEST("Optional Evening_wanders.mp3 development asset is not present");
         }
         probe.close();
 
