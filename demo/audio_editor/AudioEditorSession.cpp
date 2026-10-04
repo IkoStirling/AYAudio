@@ -1,4 +1,8 @@
 #include "AudioEditorSession.h"
+#include "ChartDocument.h"
+#ifdef _WIN32
+#include <Windows.h>
+#endif
 
 #include "AYUI/Button.h"
 #include "AYUI/Slider.h"
@@ -36,6 +40,26 @@
 namespace ayt::audio {
 namespace {
 
+bool launchChartPreview(const std::string& snapshot,std::string& error) {
+#ifdef _WIN32
+    wchar_t executable[32768]{};GetModuleFileNameW(nullptr,executable,32768);
+    const auto self=std::filesystem::path(executable),dir=self.parent_path();
+    const std::vector<std::filesystem::path> candidates={dir/L"AYAudio_AudioEditor.exe",dir/L"../AYAudio/demo/AYAudio_AudioEditor.exe"};
+    for(const auto& candidate:candidates) if(std::filesystem::is_regular_file(candidate)) {
+        const auto program=std::filesystem::absolute(candidate).lexically_normal();
+        std::wstring command=L"\""+program.wstring()+L"\" --play-chart \""+std::filesystem::u8path(snapshot).wstring()+L"\"";
+        STARTUPINFOW startup{};startup.cb=sizeof(startup);PROCESS_INFORMATION process{};
+        if(CreateProcessW(program.c_str(),command.data(),nullptr,nullptr,FALSE,0,nullptr,program.parent_path().c_str(),&startup,&process)) {
+            CloseHandle(process.hThread);CloseHandle(process.hProcess);return true;
+        }
+        error="preview process failed: "+std::to_string(GetLastError());return false;
+    }
+    error="AYAudio_AudioEditor.exe is missing from the runtime folder";
+#else
+    error="independent chart preview requires Windows";
+#endif
+    return false;
+}
 void setLabelValue(ayt::ui::TextLabel* label, float v, bool asInt) {
     if (label == nullptr) {
         return;
@@ -76,6 +100,7 @@ bool AudioEditorSession::attach(ayt::ui::UIManager& ui) {
         return true;
     }
 
+    if (!_chartPreviewFile.empty()) return true;
     if (!ensureClips()) {
         setStatus(L"Clip register failed");
         // No global engine mutation on attach.
@@ -102,7 +127,7 @@ void AudioEditorSession::tick(float dt) {
         ++_tickCount;
         return;
     }
-    if (liveEngine() && !ensureClips()) { setStatus(L"Audio resources could not be registered"); return; }
+    if (_chartPreviewFile.empty() && liveEngine() && !ensureClips()) { setStatus(L"Audio resources could not be registered"); return; }
     if (_driveAudioUpdate && _audio != nullptr) {
         _audio->update(dt);
     }
@@ -419,6 +444,7 @@ void AudioEditorSession::refreshTracks() {
 }
 
 void AudioEditorSession::refreshStatus() {
+    if (!_chartPreviewFile.empty()) return;
     auto* eng=liveEngine();
     if (!eng) {setStatus(L"音频引擎不可用");return;}
     if(eng->isPaused())setStatus(L"引擎输出已暂停 · 混音器中恢复");
@@ -622,6 +648,7 @@ int AudioEditorSession::effectiveTranspose() const {
     return (_workbench ? _workbench->shift : 0) + (_leftShift ? 12 : 0) - (_leftAlt ? 12 : 0);
 }
 bool AudioEditorSession::handleKey(int key, bool pressed) {
+    if (_workbench && _workbench->chart && !_chartPreviewFile.empty()) return _workbench->chart->key(key,pressed);
     if (key < 0 || key >= static_cast<int>(_keyPitches.size())) return false;
     // Release the latched note, rather than recomputing it with current modifiers.
     if (!pressed && _keyPitches[key] >= 0) {
@@ -655,7 +682,7 @@ bool AudioEditorSession::handleKey(int key, bool pressed) {
     return true;
 }
 bool AudioEditorSession::handleMouseButton(float x,float y,int button,bool pressed) {
-    if (!_workbench || _workbench->tabs->getSelectedIndex()!=0) return false;
+    if (!_workbench || !_workbench->tabs || _workbench->tabs->getSelectedIndex()!=0) return false;
     if (pressed) for (auto* parent=_workbench->piano->getParent();parent;parent=parent->getParent()) {
         if (auto* scroll=dynamic_cast<ayt::ui::ScrollView*>(parent);scroll&&!scroll->getClientRect().contains({x,y}))return false;
     }
@@ -663,19 +690,22 @@ bool AudioEditorSession::handleMouseButton(float x,float y,int button,bool press
     return pressed?_workbench->piano->onMouseButtonDown(e):_workbench->piano->onMouseButtonUp(e);
 }
 bool AudioEditorSession::handleMouseMove(float x,float y) {
-    return _workbench && _workbench->piano->onMouseMove({{x,y}});
+    return _workbench && _workbench->piano && _workbench->piano->onMouseMove({{x,y}});
 }
 void AudioEditorSession::onFocusLost() {
     releaseKeys();
+    if (_workbench && _workbench->chart) _workbench->chart->focusLost();
     if (_ui) {_ui->cancelCapture();_ui->onKeyUp(16);_ui->onKeyUp(17);_ui->onKeyUp(18);}
 }
 AudioRecorder* AudioEditorSession::recorder() const {return _workbench?&_workbench->recorder:nullptr;}
 
+bool AudioEditorSession::openChart(const std::string& path) {return _workbench && _workbench->chart && _workbench->chart->loadFile(std::filesystem::u8path(path));}
+
 bool AudioEditorSession::openResource(const std::string& path) {return _workbench&&_workbench->loadResource(path);}
-ayt::math::FRectangle AudioEditorSession::pianoKeyBounds(int note) const {return _workbench?_workbench->piano->keyBounds(note):ayt::math::FRectangle{};}
+ayt::math::FRectangle AudioEditorSession::pianoKeyBounds(int note) const {return _workbench&&_workbench->piano?_workbench->piano->keyBounds(note):ayt::math::FRectangle{};}
 
 void AudioEditorSession::releaseKeys() {
-    if (_workbench) _workbench->piano->cancel();
+    if (_workbench && _workbench->piano) _workbench->piano->cancel();
     _keyboard.fill(false); _mouse.fill(false); _mouseKey=-1; _spaceDown=false; _pedalLatch=false;
     _keyPitches.fill(-1); _leftShift=false; _leftAlt=false;
     if (_instrument) {
@@ -685,7 +715,7 @@ void AudioEditorSession::releaseKeys() {
     } updateKeys();
 }
 void AudioEditorSession::updateKeys() {
-    if (!_workbench) return;
+    if (!_workbench || !_workbench->piano) return;
     auto* p=_workbench->piano;p->octave=_octave;p->transpose=effectiveTranspose();p->markDirty();
     _workbench->instrument->setText(_instrumentName+L" · 键盘 C"+std::to_wstring(_octave)+L" · 移调 "+std::to_wstring(_workbench->shift)+L" 半音 · 临时 "+std::to_wstring(effectiveTranspose()-_workbench->shift)+L" 半音");
     if (auto* b=dynamic_cast<ayt::ui::Button*>(_ui->findById("btn_sustain"))) b->setText((_pedalLatch||_spaceDown)?L"延音开启":L"延音关闭");

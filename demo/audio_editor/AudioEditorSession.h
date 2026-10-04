@@ -1,7 +1,7 @@
 #pragma once
 
 // Shared core for AYAudio_AudioEditor.exe and AYEditor ChildWindow host.
-// Owns the four-page workbench mounted into audio_editor_root.
+// Owns the five-page workbench mounted into audio_editor_root.
 
 #include "AYUI/UIManager.h"
 
@@ -60,6 +60,11 @@ public:
     bool handleMouseMove(float x, float y);
     void onFocusLost();
     bool openResource(const std::string& path);
+    // Authoring host integration; chart preview is configured before attach.
+    bool openChart(const std::string& path);
+    void setChartPreviewFile(std::string path) { _chartPreviewFile=std::move(path); }
+    using ChartLauncher=std::function<bool(const std::string&,std::string&)>;
+    void setChartLauncher(ChartLauncher launcher) { _chartLauncher=std::move(launcher); }
     ayt::math::FRectangle pianoKeyBounds(int note) const;
     void releaseKeys();
     void setAssetRoot(std::string root) { _assetRoot=std::move(root); }
@@ -125,6 +130,8 @@ private:
     ayt::ui::UIManager* _ui = nullptr;
     AudioSubSystem* _audio = nullptr;
     PathPicker _pathPicker, _recordingFolderPicker;
+    std::string _chartPreviewFile;
+    ChartLauncher _chartLauncher;
     RecordingRootProvider _recordingRoot;
     std::function<void(const std::string&)> _recordingSaved;
 

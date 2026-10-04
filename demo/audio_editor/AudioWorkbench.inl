@@ -391,6 +391,8 @@ class Waveform final : public LeafWidget
         renderer.popClip();
     }
 };
+
+#include "ChartWorkbench.inl"
 } // namespace workbench
 
 struct AudioEditorSession::Workbench
@@ -407,6 +409,7 @@ struct AudioEditorSession::Workbench
     workbench::Piano *piano = nullptr;
     workbench::Meter *meter = nullptr;
     workbench::Waveform *wave = nullptr;
+    std::unique_ptr<workbench::ChartDesk> chart;
     ayt::ui::TextLabel *instrument = nullptr, *resourceName = nullptr, *resourceStatus = nullptr, *diagnostic = nullptr,
                        *noteStatus = nullptr;
     ayt::ui::CheckBox *keyboardEnabled = nullptr, *loop = nullptr;
@@ -675,6 +678,20 @@ struct AudioEditorSession::Workbench
         root->setLayoutSizeManaged(false);
         root->setAnchorLayout(a);
         host->addChild(root);
+        auto buildChart=[this](VBox* page,bool preview) {
+            chart=std::make_unique<workbench::ChartDesk>(s,page,preview,[this]{return s.liveEngine();},s._audio,
+                [this]{return recordingRoot();},s._pathPicker,s._recordingSaved,
+                [this](const std::string& file,std::string& error){
+                    stopResource();s.releaseKeys();s.stopStream();
+                    return s._chartLauncher?s._chartLauncher(file,error):launchChartPreview(file,error);
+                },s._recordingFolderPicker);
+        };
+        if(!s._chartPreviewFile.empty()) {
+            auto* page=new VBox();page->setSpacing(10);root->addWidget(page);
+            buildChart(page,true);
+            if(chart->loadFile(std::filesystem::u8path(s._chartPreviewFile)))chart->start();
+            return;
+        }
         auto *heading = row(root, 80);
         heading->addWidget(label(L"AYAudio · 音频工作台"), 210);
         s._status = label(L"音源准备中", "lbl_status");
@@ -1026,6 +1043,8 @@ struct AudioEditorSession::Workbench
         placeholder(mixer, L"独立编辑器试听分组（待实现）");
         placeholder(mixer, L"另存项目混音预设（待实现）");
         buildRecordingPage();
+        auto* chartPage=new VBox();chartPage->setPadding(12,14,12,8);chartPage->setSpacing(8);
+        addPage(L"谱面编辑",chartPage);buildChart(chartPage,false);
         diagnostic = label(L"诊断：等待音频引擎", "audio_diagnostic");
         root->addWidget(diagnostic, 28);
         tabs->setOnSelectionChanged([this](int index) {
@@ -1079,6 +1098,7 @@ struct AudioEditorSession::Workbench
     }
     void releaseAudio()
     {
+        if(chart) chart->release();
         stopResource();
         if (resourceValid() && resourceClip)
             s.liveEngine()->releaseClip(resourceClip);
@@ -1315,6 +1335,8 @@ struct AudioEditorSession::Workbench
     }
     void tick(float dt)
     {
+        if(chart) chart->tick();
+        if(!s._chartPreviewFile.empty()) return;
         tickRecording();
         updating = true;
         for (auto &g : gains)

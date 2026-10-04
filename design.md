@@ -649,3 +649,42 @@ take into a selected matching output endpoint, saves WAV and reads it back.
 实机发现 miniaudio 先初始化 MTA 会使 IFileOpenDialog 目录选择卡住；独立 UI 线程
 现在在音频初始化前用 RAII 建立 STA，WASAPI 接受既有 apartment，回调线程仍独立。
 修正后目录选择、录音与保存完整链路已通过。此修正仅影响独立启动入口。
+
+
+## 2026-10-05 Four-lane chart authoring and independent preview
+
+ChartDocument.h is demo-only authoring data: schema `ay.audio.chart`, version 1,
+lanes=4, UTF-8 `audio`, `audioRelativeToAssets`, `bpm`, `beatOffsetSeconds`, and
+`notes[{lane,timeSeconds,endSeconds}]`. Equal start/end means tap; later end means
+hold. All numeric fields must be finite; BPM is 20..1000, beat offset ±600s,
+notes ≤100000. Note start is in [0,duration), end is in [start,duration]. Duplicate
+or overlapping notes in a lane are rejected. The reader caps files at 16 MiB.
+The immutable decoded music is shared with one registered clip; playback frame
+position refers to the normalized engine sample rate after registerClip resampling.
+
+Assets-relative chart/audio references are canonicalized under the selected root;
+absolute paths and traversal cannot enter the virtual namespace. Atomic chart
+save checks a loaded/saved byte baseline before overwriting and pins the root.
+External audio can be referenced absolutely for local authoring, so that chart
+is not portable until its source is moved into project Assets. No new resource
+loader or cook format is introduced.
+
+ChartCanvas renders a horizontal authoring timeline or vertical player. The
+editor snap grid uses BPM/offset and selected subdivision; numeric edits allow
+exact seconds. History holds at most 100 note states. Preview snapshots live in
+the OS temp directory and resolve audio absolutely; launching uses a quoted
+CreateProcessW command, without shell parsing. The portable runtime includes
+the same audio host and UI assets. The preview uses a separate AudioSubSystem.
+
+Judge consumes lane down/up times: ±150ms acceptance, ±45ms Perfect, otherwise
+Good. Repeat downs do not score twice; a hold needs its head and continuous
+press to its tail, early release misses, and the worse head/tail grade wins.
+Focus loss pauses the owned voice and clears held lanes; incomplete holds miss.
+Normalized clip frame position is the clock with monotonic, bounded 50ms extrapolation;
+this is not acoustic timestamp or device-latency calibration. Completion is
+bounded by decoded duration. Engine generation changes cancel playback safely.
+
+AudioChartTests covers format, bad notes, snapping, history, judgement and path
+containment. EditorAudioChartTests covers save/reopen, relative music, unsaved
+snapshot isolation, project-switch refusal, sample-rate conversion, key repeats,
+tap/hold judgement and focus pause without pausing the shared engine.

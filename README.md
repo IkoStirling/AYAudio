@@ -69,8 +69,8 @@ Public state mutation and callback rendering are serialized; the callback uses
 a try-lock and emits silence on contention rather than waiting. Preload outside
 live performance; this is not a hard realtime/no-dropout guarantee.
 
-Audio Editor (both hosts) has three pages: instrument performance, single-resource
-editing and engine mixing. The piano appears only in performance. Its grip or
+Audio Editor (both hosts) has five tabs: instrument performance, single-resource
+editing, engine mixing, recording and chart authoring. The piano appears only in performance. Its grip or
 middle button pans the key strip; the wheel changes key width around the cursor.
 A W S E D F T G Y H U J K plays C..C; Space sustains. Signed semitone transpose
 supports -24..+24, updates displayed/played pitches and releases held notes before
@@ -123,8 +123,8 @@ header; readings below its -60 dBFS range display -inf instead of decay noise.
 
 ### Recording desk and native waveform selection
 
-The shared workbench now uses a continuous four-tab header: performance,
-resources, mixer and recording. Selection tint is composited into the waveform
+The shared workbench now uses a continuous five-tab header: performance,
+resources, mixer, recording and chart authoring. Selection tint is composited into the waveform
 background before peaks, handles and cursor are drawn, so native GDI and GPU
 hosts display the same visible waveform rather than an opaque blue overlay.
 
@@ -144,3 +144,32 @@ editing. Paths escaping the root and existing destinations are rejected.
 Recording output selection applies to this desk's monitoring/playback/loopback;
 the Host AudioEngine's output and mixer buses are independent. Endpoint choices
 are session-local. Closing releases recording devices and discards unsaved PCM.
+
+
+## Four-lane chart authoring (2026-10-05)
+
+The fifth workbench tab, 谱面编辑, selects music, edits BPM/beat offset and
+1..1/16-beat snapping, and shares the waveform viewport with a four-row D/F/J/K
+timeline. Click empty space for a tap, drag for a hold, drag an existing note to
+move it, right-click to delete, middle-drag to pan, and wheel to zoom. Numeric
+lane/start/end editing and note undo/redo are available.
+
+Save/Open use an Assets-relative `audio/charts/*.chart.json` path. Standalone
+users choose an asset folder. In-project music is stored relative to that root;
+external music retains an absolute reference. Save validates duration and same
+lane overlaps and refuses a project switch, an unrelated existing file, or an
+external edit. Original audio stays intact.
+
+运行谱面 launches `AYAudio_AudioEditor.exe --play-chart <snapshot>` in an
+independent window, including unsaved notes/settings. It has a two-second
+countdown, four falling lanes, tap/hold judgement, combo/error display, restart,
+Esc pause/resume and automatic focus-loss pause. The preview owns its music voice;
+the parent stops its own audition, instrument keys and stream before launching.
+`AYEditorStage` also stages this executable/assets for the portable editor.
+
+This is an authoring preview, not a recommended gameplay API. Timing follows
+normalized clip playback frames with at most 50 ms interpolation; output/input latency
+calibration, variable BPM, configurable key maps, scoring persistence and chart
+cooking are deferred. Undo/redo covers notes, not settings. Temporary preview
+snapshots are separate from saved assets. See `design.md` for schema/validation
+and `AudioChartTests` / `EditorAudioChartTests` for focused regressions.

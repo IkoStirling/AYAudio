@@ -1,3 +1,4 @@
+find_package(nlohmann_json CONFIG REQUIRED)
 cmake_minimum_required(VERSION 3.15)
 
 # AYAudio Unit Tests
@@ -13,6 +14,7 @@ add_executable(${TEST_TARGET}
     Test_AudioMixer.cpp
     Test_AudioEngine.cpp
     Test_AudioRecorder.cpp
+    Test_ChartDocument.cpp
     Test_SampleInstrument.cpp
     Test_MiniaudioBackend.cpp
     Test_AudioSubSystemBridge.cpp
@@ -26,6 +28,7 @@ add_executable(${TEST_TARGET}
 
 target_link_libraries(${TEST_TARGET} PRIVATE
     AYTest
+    nlohmann_json::nlohmann_json
     AYAudio
     AYMath
     AYEntity

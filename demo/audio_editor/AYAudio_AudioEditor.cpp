@@ -11,6 +11,7 @@
 #include <Windows.h>
 #include <commdlg.h>
 #include <shobjidl.h>
+#include <shellapi.h>
 #include <AYProject/Project.h>
 #include <windowsx.h>
 
@@ -317,10 +318,16 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         HRESULT initialized=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED|COINIT_DISABLE_OLE1DDE);
         ~UiComApartment() {if(SUCCEEDED(initialized)) CoUninitialize();}
     } uiCom;
-    AllocConsole();
+    std::string chartPreview;
+    int argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
+    if(argv && argc==3 && std::wstring(argv[1])==L"--play-chart") {
+        const auto file=std::filesystem::path(argv[2]).u8string();chartPreview.assign(file.begin(),file.end());
+    }
+    if(argv)LocalFree(argv);
+    if(chartPreview.empty()) AllocConsole();
     FILE *dummy = nullptr;
-    freopen_s(&dummy, "CONOUT$", "w", stdout);
-    freopen_s(&dummy, "CONOUT$", "w", stderr);
+    freopen_s(&dummy, chartPreview.empty()?"CONOUT$":"NUL", "w", stdout);
+    freopen_s(&dummy, chartPreview.empty()?"CONOUT$":"NUL", "w", stderr);
 
     ayt::audio::AudioSubSystem audio;
     audio.setBackend(ayt::audio::makeMiniaudioBackend());
@@ -332,7 +339,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 
     ayt::device::DeviceManager devices;
     ayt::device::DeviceConfig cfg{};
-    cfg.window.title = "AYAudio Editor";
+    cfg.window.title = chartPreview.empty()?"AYAudio Editor":"AYAudio Chart Preview";
     cfg.window.width = kWidth;
     cfg.window.height = kHeight;
     if (!devices.initialize(cfg))
@@ -407,6 +414,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     ayt::audio::AudioEditorSession session;
     state.session = &session;
     session.setAudio(&audio);
+    session.setChartPreviewFile(chartPreview);
     session.setAssetRoot(std::filesystem::path(chromePath).parent_path().string());
     session.setPathPicker([hwnd]() { return showOpenAudioDialog(hwnd); });
     session.setRecordingFolderPicker([hwnd]{return chooseRecordingAssets(hwnd);});
