@@ -569,3 +569,26 @@ activate its own UIManager, invalidate the cache and perform layout immediately.
 Tab selection must also invalidate and perform layout immediately. Tests must
 use the production load order without a post-attachment resize/layout call,
 including a different primary UIManager being active and repeated attachment.
+
+### Performance shortcuts and compact telemetry (2026-10-04)
+
+Physical keyboard gates latch actual note-on MIDI pitches in a 256-entry table.
+Left Shift/Alt temporary offsets are +2/-2 semitones, compose additively and
+affect new presses; key-up uses the latched pitch even if modifiers/focus have
+changed. Auto-repeat does not create voices. Multiple physical bindings for
+one pitch share the keyboard gate, so releasing upper A cannot stop lower
+comma while it remains held. Pointer releases similarly retain the note-on
+pitch. Focus loss, mapping changes, detach and host replacement clear latches
+and temporary state. Native hosts preserve left/right modifier identity; the
+standalone resolves Shift scancodes with a Left Shift fallback when absent.
+Lower Z X C V B N M comma map to offsets -12,-10,-8,-7,-5,-3,-1,0 from base C.
+
+The persistent meter moves into the 80-pixel header with a 150-pixel width,
+removing the full-height sidebar. Narrow vertical L/R segments, peak hold and
+overload remain; scale ticks are 0/-30/-60. Below-floor readings show -inf.
+Piano pitch and shortcut labels render separately because native backends
+do not all interpret embedded newlines; the initial strip starts at C3.
+
+The host CMake directories explicitly list AudioWorkbench.inl as an
+OBJECT_DEPENDS of AudioEditorSession.cpp so included UI changes trigger a
+recompile even when compiler include-dependency scanning is unavailable.

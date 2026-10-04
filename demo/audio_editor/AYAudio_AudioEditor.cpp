@@ -258,14 +258,20 @@ std::intptr_t handleMessage(AppState *state, unsigned msg, std::uintptr_t wParam
         return 0;
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN: {
-        if (!state->session || !state->session->handleKey(static_cast<int>(wParam), true))
+        int native=static_cast<int>(wParam);
+        if (native==VK_SHIFT) native=MapVirtualKeyW((lParam>>16)&0xff,MAPVK_VSC_TO_VK_EX)==VK_RSHIFT?VK_RSHIFT:VK_LSHIFT;
+        if (native==VK_MENU) native=(lParam&(1<<24))?VK_RMENU:VK_LMENU;
+        if (!state->session || !state->session->handleKey(native, true))
             ui.onKeyDown(static_cast<int>(wParam));
         handled = true;
         return 0;
     }
     case WM_KEYUP:
     case WM_SYSKEYUP: {
-        if (!state->session || !state->session->handleKey(static_cast<int>(wParam), false))
+        int native=static_cast<int>(wParam);
+        if (native==VK_SHIFT) native=MapVirtualKeyW((lParam>>16)&0xff,MAPVK_VSC_TO_VK_EX)==VK_RSHIFT?VK_RSHIFT:VK_LSHIFT;
+        if (native==VK_MENU) native=(lParam&(1<<24))?VK_RMENU:VK_LMENU;
+        if (!state->session || !state->session->handleKey(native, false))
             ui.onKeyUp(static_cast<int>(wParam));
         handled = true;
         return 0;

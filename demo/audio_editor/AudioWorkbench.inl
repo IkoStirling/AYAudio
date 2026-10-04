@@ -8,6 +8,15 @@ inline FVector4 color(const char *token)
 {
     return expandColorToken(token);
 }
+inline int keyboardOffset(int key)
+{
+    constexpr int upper[] = {'A','W','S','E','D','F','T','G','Y','H','U','J','K'};
+    constexpr int lower[] = {'Z','X','C','V','B','N','M',188};
+    constexpr int offsets[] = {-12,-10,-8,-7,-5,-3,-1,0};
+    for (int i=0;i<13;++i) if (key==upper[i]) return i;
+    for (int i=0;i<8;++i) if (key==lower[i]) return offsets[i];
+    return 128;
+}
 inline bool black(int n)
 {
     const int k = n % 12;
@@ -83,47 +92,32 @@ class Meter final : public LeafWidget
     void onRender(IRenderBackend &renderer) override
     {
         const auto b = getWorldBounds();
-        const float top = b.minY + 62, bottom = b.maxY - 46, height = std::max(1.0f, bottom - top);
-        renderer.drawText({b.minX + 6, b.minY + 8, b.maxX - 6, b.minY + 28}, L"输出电平", 13,
-                          color("$color.text.primary"));
-        renderer.drawText({b.minX + 6, b.minY + 30, b.maxX - 6, b.minY + 50}, clipHold > 0 ? L"过载" : L"L     R", 12,
-                          clipHold > 0 ? FVector4{.95f, .25f, .2f, 1} : color("$color.text.muted"));
-        for (int channel = 0; channel < 2; ++channel)
-        {
-            const float value = channel ? right : left, held = channel ? holdR : holdL, x = b.minX + 8 + channel * 26;
-            const auto normalized = [](float p) {
-                return p > 0 ? std::clamp((20 * std::log10(p) + 60) / 60, 0.0f, 1.0f) : 0.0f;
-            };
-            renderer.drawRect({x, top, x + 18, bottom}, color("$color.bg.surface"));
-            const float filled = normalized(value);
-            for (int segment = 0; segment < 30; ++segment)
-                if ((segment + .5f) / 30 < filled)
-                {
-                    const auto c = segment >= 28   ? FVector4{.95f, .25f, .2f, 1}
-                                   : segment >= 24 ? FVector4{.92f, .7f, .2f, 1}
-                                                   : FVector4{.2f, .72f, .44f, 1};
-                    renderer.drawRect(
-                        {x, bottom - height * (segment + 1) / 30 + 1, x + 18, bottom - height * segment / 30}, c);
-                }
-            const float y = bottom - height * normalized(held);
-            renderer.drawRect({x, y, x + 18, y + 2}, color("$color.text.primary"));
+        const float top=b.minY+24, bottom=b.maxY-12, height=std::max(1.0f,bottom-top);
+        renderer.drawText({b.minX+6,b.minY,b.maxX,b.minY+20},L"输出 L / R",12,color("$color.text.primary"));
+        const auto normalized=[](float p) { return p>0 ? std::clamp((20*std::log10(p)+60)/60,0.0f,1.0f) : 0.0f; };
+        for (int channel=0;channel<2;++channel) {
+            const float value=channel?right:left, held=channel?holdR:holdL, x=b.minX+8+channel*20;
+            renderer.drawRect({x,top,x+12,bottom},color("$color.bg.surface"));
+            for (int segment=0;segment<20;++segment) if ((segment+.5f)/20<normalized(value)) {
+                const auto c=segment>=18?FVector4{.95f,.25f,.2f,1}:segment>=16?FVector4{.92f,.7f,.2f,1}:FVector4{.2f,.72f,.44f,1};
+                renderer.drawRect({x,bottom-height*(segment+1)/20+1,x+12,bottom-height*segment/20},c);
+            }
+            const float y=bottom-height*normalized(held);
+            renderer.drawRect({x,y,x+12,std::min(bottom,y+2)},color("$color.text.primary"));
         }
-        for (int db = 0; db >= -60; db -= 12)
-        {
-            const float y = top + height * (-db) / 60;
-            renderer.drawText({b.minX + 63, y - 7, b.maxX, y + 10}, std::to_wstring(db), 11,
-                              color("$color.text.muted"));
+        for (int db=0;db>=-60;db-=30) {
+            const float y=top+height*(-db)/60;
+            renderer.drawText({b.minX+46,y-6,b.minX+70,y+10},std::to_wstring(db),10,color("$color.text.muted"));
         }
-        renderer.drawText({b.minX + 4, bottom + 10, b.maxX - 2, b.maxY - 4},
-                          std::max(holdL, holdR) > 0 ? number(20 * std::log10(std::max(holdL, holdR)), 1) + L" dBFS"
-                                                     : L"-inf dBFS",
-                          11, color("$color.text.muted"));
+        const float peak=std::max(holdL,holdR);
+        renderer.drawText({b.minX+72,top,b.maxX,bottom},peak>=.001f?number(20*std::log10(peak),1)+L" dBFS":L"-inf dBFS",11,color("$color.text.muted"));
+        if (clipHold>0) renderer.drawText({b.minX+72,bottom-14,b.maxX,b.maxY},L"过载",11,FVector4{.95f,.25f,.2f,1});
     }
 };
 class Piano final : public LeafWidget
 {
   public:
-    float width = 44, offset = 850, lastX = 0;
+    float width = 44, offset = 704, lastX = 0;
     bool dragging = false, playing = false;
     int mouseNote = -1, octave = 4, transpose = 0, low = 18, high = 102;
     std::function<void(int, bool)> onNote;
@@ -266,10 +260,13 @@ class Piano final : public LeafWidget
                         const int index = n - (octave + 1) * 12;
                         static const wchar_t *shortcuts[] = {L"A", L"W", L"S", L"E", L"D", L"F", L"T",
                                                              L"G", L"Y", L"H", L"U", L"J", L"K"};
-                        const auto text = noteName(n + transpose) +
-                                          (index >= 0 && index < 13 ? L"\n" + std::wstring(shortcuts[index]) : L"");
-                        renderer.drawText({k.minX + 3, k.maxY - 38, k.maxX, k.maxY - 4}, text, 11,
-                                          black(n) ? FVector4{.95f, .96f, .98f, 1} : FVector4{.1f, .12f, .15f, 1});
+                        std::wstring shortcut=index>=0&&index<13?shortcuts[index]:L"";
+                        constexpr int lowerOffsets[]={-12,-10,-8,-7,-5,-3,-1,0};
+                        constexpr const wchar_t* lowerNames[]={L"Z",L"X",L"C",L"V",L"B",L"N",L"M",L","};
+                        for(int i=0;i<8;++i) if(index==lowerOffsets[i]) shortcut+=(shortcut.empty()?L"":L"/")+std::wstring(lowerNames[i]);
+                        const auto ink=black(n)?FVector4{.95f,.96f,.98f,1}:FVector4{.1f,.12f,.15f,1};
+                        renderer.drawText({k.minX+3,k.maxY-38,k.maxX,k.maxY-20},noteName(n+transpose),11,ink);
+                        renderer.drawText({k.minX+3,k.maxY-20,k.maxX,k.maxY-4},shortcut,11,ink);
                     }
                 }
         renderer.popClip();
@@ -510,10 +507,13 @@ struct AudioEditorSession::Workbench
         root->setLayoutSizeManaged(false);
         root->setAnchorLayout(a);
         host->addChild(root);
-        auto *heading = row(root, 32);
+        auto *heading = row(root, 80);
         heading->addWidget(label(L"AYAudio · 音频工作台"), 210);
         s._status = label(L"音源准备中", "lbl_status");
         heading->addWidget(s._status);
+        meter = new Meter();
+        meter->setId("audio_output_meter");
+        heading->addWidget(meter, 150);
         auto *content = new HBox();
         content->setSpacing(16);
         root->addWidget(content);
@@ -521,9 +521,7 @@ struct AudioEditorSession::Workbench
         tabs->setId("audio_tabs");
         tabs->setHeaderHeight(38);
         content->addWidget(tabs);
-        meter = new Meter();
-        meter->setId("audio_output_meter");
-        content->addWidget(meter, 100);
+
         auto *performance = new VBox();
         performance->setPadding(12, 14, 12, 8);
         performance->setSpacing(4);
@@ -655,9 +653,14 @@ struct AudioEditorSession::Workbench
             110);
         button(keys, L"释放全部音符", "btn_stop_all", [this] { s.releaseKeys(); }, 140);
         keys->addWidget(label(L"Space：延音"));
+        performance->addWidget(label(L"左 Shift：临时 +2 半音  |  左 Alt：临时 −2 半音  |  同时按住：抵消"), 24);
+        performance->addWidget(label(L"下排 Z X C V B N M ,：低八度白键（C 到 C）"), 24);
         piano = new Piano();
         piano->setId("piano_keyboard");
-        piano->onNote = [this](int n, bool down) { s.pressPitch(n + shift, false, down); };
+        piano->onNote = [this](int n, bool down) {
+            if (down) { s._mouseKey=n+s.effectiveTranspose();s.pressPitch(s._mouseKey,false,true); }
+            else if (s._mouseKey>=0) { const int pitch=s._mouseKey;s._mouseKey=-1;s.pressPitch(pitch,false,false); }
+        };
         piano->isDown = [this](int n) { return n >= 0 && n < 128 && (s._keyboard[n] || s._mouse[n]); };
         performance->addWidget(piano, 160);
         noteStatus = label(L"A W S E D F T G Y H U J K · 缩放和平移保持音高", "note_status");

@@ -81,3 +81,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../EngineAssets/AYAudio/samples")
             "$<TARGET_FILE_DIR:AYAudio_AudioEditor>/assets/samples"
         COMMENT "Stage piano samples and attribution")
 endif()
+
+# The shared workbench is textually included; track it even without compiler dep scanning.
+set_property(SOURCE audio_editor/AudioEditorSession.cpp APPEND PROPERTY OBJECT_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/AudioWorkbench.inl")

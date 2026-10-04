@@ -49,7 +49,7 @@ void setLabelValue(ayt::ui::TextLabel* label, float v, bool asInt) {
 
 #include "AudioWorkbench.inl"
 
-AudioEditorSession::AudioEditorSession() = default;
+AudioEditorSession::AudioEditorSession() { _keyPitches.fill(-1); }
 
 AudioEditorSession::~AudioEditorSession() {
     detach();
@@ -126,6 +126,7 @@ void AudioEditorSession::releaseResources() {
     }
     _instrument.reset(); _instrumentClips.clear(); _ownedVoices.clear();
     _keyboard.fill(false); _mouse.fill(false); _mouseKey=-1;
+    _keyPitches.fill(-1); _leftShift=false; _leftAlt=false;
     _stream={}; _streamPath.clear(); _loopVoice=InvalidVoice;
     _clipA=_clipB=_clipLoop=InvalidClipId; _clipsReady=false; _boundEngine=nullptr;
     _paused=false; _spaceDown=false; _pedalLatch=false;
@@ -613,13 +614,41 @@ void AudioEditorSession::pressPitch(int pitch,bool keyboard,bool down) {
 void AudioEditorSession::pressNote(int index,bool keyboard,bool down) {
     if (index>=0 && index<13) pressPitch((_octave+1)*12+index+(_workbench?_workbench->shift:0),keyboard,down);
 }
-bool AudioEditorSession::handleKey(int key,bool pressed) {
-    constexpr int keys[13]={'A','W','S','E','D','F','T','G','Y','H','U','J','K'};
+int AudioEditorSession::effectiveTranspose() const {
+    return (_workbench ? _workbench->shift : 0) + (_leftShift ? 2 : 0) - (_leftAlt ? 2 : 0);
+}
+bool AudioEditorSession::handleKey(int key, bool pressed) {
+    if (key < 0 || key >= static_cast<int>(_keyPitches.size())) return false;
+    // Release the latched note, rather than recomputing it with current modifiers.
+    if (!pressed && _keyPitches[key] >= 0) {
+        const int pitch = _keyPitches[key];
+        _keyPitches[key] = -1;
+        if (std::find(_keyPitches.begin(), _keyPitches.end(), pitch) == _keyPitches.end())
+            pressPitch(pitch, true, false);
+        return true;
+    }
     if (!_workbench || _workbench->tabs->getSelectedIndex()!=0 || !_workbench->keyboardEnabled->isChecked()) return false;
-    if (pressed && _ui && ((_ui->getFocusedWidget() && _ui->getFocusedWidget()->isTextEditingWidget()) || (_ui->getModifiers()&6u))) return false;
+    const bool editing = _ui && _ui->getFocusedWidget() && _ui->getFocusedWidget()->isTextEditingWidget();
+    if (key == 0xA0 || key == 0xA4) {
+        bool& held = key == 0xA0 ? _leftShift : _leftAlt;
+        if (pressed && editing) return false;
+        if (!pressed && !held) return false;
+        held = pressed;
+        updateKeys();
+        return true;
+    }
+    if (pressed && (editing || (_ui && ((_ui->getModifiers() & 2u) || ((_ui->getModifiers() & 4u) && !_leftAlt))))) return false;
     if (key==32) { if (!ensureClips()) return false;_spaceDown=pressed;if (_instrument) _instrument->setSustain(pressed||_pedalLatch);updateKeys();return true; }
-    for (int i=0;i<13;++i) if (key==keys[i]) {const int pitch=(_octave+1)*12+i+_workbench->shift;if(pitch<0||pitch>127)return false;if(!pressed&&!_keyboard[pitch])return false;pressPitch(pitch,true,pressed);return true;}
-    return false;
+    const int offset = workbench::keyboardOffset(key);
+    if (offset == 128 || !pressed) return false;
+    if (_keyPitches[key] >= 0) return true; // native auto-repeat must not create another voice
+    if (!ensureClips()) return false;
+    const int pitch = (_octave+1)*12 + offset + effectiveTranspose();
+    if (pitch < 0 || pitch > 127) return false;
+    _keyPitches[key] = pitch;
+    pressPitch(pitch, true, true);
+    if (!_keyboard[pitch]) _keyPitches[key] = -1;
+    return true;
 }
 bool AudioEditorSession::handleMouseButton(float x,float y,int button,bool pressed) {
     if (!_workbench || _workbench->tabs->getSelectedIndex()!=0) return false;
@@ -642,6 +671,7 @@ ayt::math::FRectangle AudioEditorSession::pianoKeyBounds(int note) const {return
 void AudioEditorSession::releaseKeys() {
     if (_workbench) _workbench->piano->cancel();
     _keyboard.fill(false); _mouse.fill(false); _mouseKey=-1; _spaceDown=false; _pedalLatch=false;
+    _keyPitches.fill(-1); _leftShift=false; _leftAlt=false;
     if (_instrument) {
         const auto* e=liveEngine();
         if (!e || e!=_boundEngine || e->lifecycleGeneration()!=_engineGeneration) _instrument->abandon();
@@ -650,8 +680,8 @@ void AudioEditorSession::releaseKeys() {
 }
 void AudioEditorSession::updateKeys() {
     if (!_workbench) return;
-    auto* p=_workbench->piano;p->octave=_octave;p->transpose=_workbench->shift;p->markDirty();
-    _workbench->instrument->setText(_instrumentName+L" · 键盘 C"+std::to_wstring(_octave)+L" · 移调 "+std::to_wstring(_workbench->shift)+L" 半音");
+    auto* p=_workbench->piano;p->octave=_octave;p->transpose=effectiveTranspose();p->markDirty();
+    _workbench->instrument->setText(_instrumentName+L" · 键盘 C"+std::to_wstring(_octave)+L" · 移调 "+std::to_wstring(_workbench->shift)+L" 半音 · 临时 "+std::to_wstring(effectiveTranspose()-_workbench->shift)+L" 半音");
     if (auto* b=dynamic_cast<ayt::ui::Button*>(_ui->findById("btn_sustain"))) b->setText((_pedalLatch||_spaceDown)?L"延音开启":L"延音关闭");
 }
 

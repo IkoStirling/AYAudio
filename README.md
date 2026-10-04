@@ -80,7 +80,7 @@ and modifier state. Performance presets edit gain/attack/release parameters.
 
 Mixer rows are name | slider | editable percentage. Master/Music/SFX/UI/Voice
 and reverb return address the current shared engine and are session values, not
-automatically saved project/OS settings. A persistent vertical L/R meter reads
+automatically saved project/OS settings. A compact upper-right vertical L/R meter reads
 `AudioEngine::outputLevels`: actual post-mix sample peaks before final clipping,
 with dBFS display, decaying peak hold and overload indication. It is not RMS/LUFS.
 
@@ -111,3 +111,11 @@ Native workbench attachment recalculates layout immediately, even when the host
 already cached an empty mount panel. Tab changes also recalculate immediately;
 no window resize or per-frame layout call is required. The EditorAudioTests
 suite covers native/standalone load order, reattachment and tab switching.
+
+Performance shortcuts: Left Shift temporarily adds two semitones; Left Alt
+subtracts two, and holding both cancels. Z X C V B N M comma play the white
+keys C..C one octave below the main row. Temporary offsets add to fixed
+transpose on note-on; held notes retain their original pitch until release.
+Focus loss clears the temporary state. Right modifiers and text editing do not
+trigger these shortcuts. The meter occupies 150 x 80 logical pixels in the
+header; readings below its -60 dBFS range display -inf instead of decay noise.

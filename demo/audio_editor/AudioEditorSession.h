@@ -52,7 +52,8 @@ public:
     // Optional audio update + status chrome refresh.
     void tick(float dt);
 
-    // Native virtual-key values (A..Z/Space). Release is processed even while text editing.
+    // Native virtual keys, including VK_LSHIFT/VK_LMENU and OEM comma.
+    // Each physical key retains its note-on pitch until release, even after temporary transpose.
     bool handleKey(int key, bool pressed);
     bool handleMouseButton(float x, float y, int button, bool pressed);
     bool handleMouseMove(float x, float y);
@@ -74,6 +75,7 @@ private:
     void updateKeys();
     void stopOwned();
     void pressNote(int index, bool keyboard, bool down);
+    int effectiveTranspose() const;
     AudioEngine* liveEngine() const;
     std::unique_ptr<SampleInstrument> _instrument;
     AudioEngine* _boundEngine = nullptr;
@@ -81,6 +83,8 @@ private:
     std::vector<AudioClipId> _instrumentClips;
     std::vector<VoiceHandle> _ownedVoices;
     std::array<bool,128> _keyboard{}, _mouse{};
+    std::array<int,256> _keyPitches;
+    bool _leftShift=false, _leftAlt=false;
     int _mouseKey=-1, _octave=4;
     float _velocity=0.8f, _previewGain=0.7f;
     bool _sine=false, _refreshing=false, _spaceDown=false, _pedalLatch=false;
