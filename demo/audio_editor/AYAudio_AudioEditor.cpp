@@ -310,6 +310,13 @@ std::string chooseRecordingAssets(HWND owner) {
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 {
+    // Shell folder dialogs require STA. Establish it before miniaudio's
+    // context can initialize this UI thread as MTA; its WASAPI backend accepts
+    // an existing apartment and owns separate device callback threads.
+    struct UiComApartment {
+        HRESULT initialized=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED|COINIT_DISABLE_OLE1DDE);
+        ~UiComApartment() {if(SUCCEEDED(initialized)) CoUninitialize();}
+    } uiCom;
     AllocConsole();
     FILE *dummy = nullptr;
     freopen_s(&dummy, "CONOUT$", "w", stdout);
