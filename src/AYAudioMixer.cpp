@@ -240,6 +240,7 @@ void AudioMixer::mix(float* output,
         return;
     }
 
+    _outputLevels = {};
     // Zero the output buffer first; voices accumulate into it.
     const size_t totalSamples = static_cast<size_t>(outputFrames) * _outputChannels;
     std::memset(output, 0, totalSamples * sizeof(float));
@@ -343,8 +344,14 @@ void AudioMixer::mix(float* output,
     // Clamp once per output frame to prevent inter-voice summation from
     // exceeding [-1, +1] (which would otherwise clip in the DAC).
     for (size_t i = 0; i < totalSamples; ++i) {
+        const float peak = std::abs(output[i]);
+        if (_outputChannels == 1 || i % _outputChannels == 0)
+            _outputLevels.left = std::max(_outputLevels.left, peak);
+        else _outputLevels.right = std::max(_outputLevels.right, peak);
+        _outputLevels.clipped |= peak > 1.0f;
         output[i] = std::clamp(output[i], -1.0f, 1.0f);
     }
+    if (_outputChannels == 1) _outputLevels.right = _outputLevels.left;
 }
 
 // Process the wet-send accumulator through 4 parallel combs + 2 series

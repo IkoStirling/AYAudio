@@ -68,4 +68,14 @@ TEST_CASE(ReleaseBeforeFirstAudioBlockDoesNotClick) {
     float output[16]{};e.render(output,8);
     for(float sample:output) CHECK(sample==0);CHECK(instrument.activeNotes()==0);
 }
+
+TEST_CASE(RoutingChangesFutureNotesOnly) {
+    AudioEngine e;CHECK(e.initialize(settings()));SampleInstrument piano(e);
+    CHECK(piano.addRegion({clip(e),60}));const auto first=piano.noteOn(60);
+    piano.setBus(AudioBus::Music);const auto second=piano.noteOn(64);VoiceRuntime state;
+    CHECK(e.voiceState(first,state));CHECK(state.bus==AudioBus::Sfx);
+    CHECK(e.voiceState(second,state));CHECK(state.bus==AudioBus::Music);
+    piano.setBus(AudioBus::Count);const auto third=piano.noteOn(67);
+    CHECK(e.voiceState(third,state));CHECK(state.bus==AudioBus::Music);
+}
 TEST_SUITE_END

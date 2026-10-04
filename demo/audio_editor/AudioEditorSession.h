@@ -1,7 +1,7 @@
 #pragma once
 
 // Shared core for AYAudio_AudioEditor.exe and AYEditor ChildWindow host.
-// Mixer / playback desk (Gallery feature set) bound to chrome JSON ids.
+// Owns the three-page workbench mounted into audio_editor_root.
 
 #include "AYUI/UIManager.h"
 
@@ -27,7 +27,7 @@ class AudioEditorSession {
 public:
     using PathPicker = std::function<std::string()>;
 
-    AudioEditorSession() = default;
+    AudioEditorSession();
     ~AudioEditorSession();
 
     AudioEditorSession(const AudioEditorSession&) = delete;
@@ -55,11 +55,18 @@ public:
     // Native virtual-key values (A..Z/Space). Release is processed even while text editing.
     bool handleKey(int key, bool pressed);
     bool handleMouseButton(float x, float y, int button, bool pressed);
+    bool handleMouseMove(float x, float y);
+    void onFocusLost();
+    bool openResource(const std::string& path);
+    ayt::math::FRectangle pianoKeyBounds(int note) const;
     void releaseKeys();
     void setAssetRoot(std::string root) { _assetRoot=std::move(root); }
     bool isAttached() const { return _ui != nullptr; }
 
 private:
+    struct Workbench;
+    std::unique_ptr<Workbench> _workbench;
+    void pressPitch(int pitch, bool keyboard, bool down);
     bool ensureClips();
     void releaseResources();
     void buildInstrument(bool sine = false);
@@ -73,7 +80,7 @@ private:
     uint64_t _engineGeneration = 0;
     std::vector<AudioClipId> _instrumentClips;
     std::vector<VoiceHandle> _ownedVoices;
-    std::array<bool,13> _keyboard{}, _mouse{};
+    std::array<bool,128> _keyboard{}, _mouse{};
     int _mouseKey=-1, _octave=4;
     float _velocity=0.8f, _previewGain=0.7f;
     bool _sine=false, _refreshing=false, _spaceDown=false, _pedalLatch=false;

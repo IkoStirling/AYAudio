@@ -34,7 +34,7 @@ VoiceHandle SampleInstrument::noteOn(int note,float velocity) {
         if (it==_notes.end()) it=_notes.begin();
         _engine->stop(it->voice); _notes.erase(it);
     }
-    const auto voice=_engine->play(region->clip,AudioBus::Sfx,{},velocity*region->gain*_gain,region->loop);
+    const auto voice=_engine->play(region->clip,_bus,{},velocity*region->gain*_gain,region->loop);
     if (!voice) return voice;
     _engine->setVoicePitch(voice,std::exp2((note-region->rootNote)/12.0f));
     _engine->setVoiceEnvelope(voice,_attack,0.015f);

@@ -1,60 +1,66 @@
 // AYAudio_AudioEditor.cpp — standalone AYUI mixer / playback desk.
 #ifndef UNICODE
-#  define UNICODE
+#define UNICODE
 #endif
 #ifndef WIN32_LEAN_AND_MEAN
-#  define WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
 #endif
 #ifndef NOMINMAX
-#  define NOMINMAX
+#define NOMINMAX
 #endif
 #include <Windows.h>
-#include <windowsx.h>
 #include <commdlg.h>
+#include <windowsx.h>
 
 #include "AudioEditorSession.h"
 
 #include <AYAudio/AudioBackendFactory.h>
 #include <AYAudio/AudioSubSystem.h>
 
-#include "AYUI.h"
-#include "AYUI/UIManager.h"
-#include "AYRenderer/UIRenderBackend.h"
+#include "AYDevice/DeviceManager.h"
 #include "AYRenderer.h"
 #include "AYRenderer/RenderTypes.h"
+#include "AYRenderer/UIRenderBackend.h"
+#include "AYUI.h"
 #include "AYUI/Theme.h"
-#include "AYDevice/DeviceManager.h"
+#include "AYUI/UIManager.h"
 
 #include <cstdio>
 #include <cstring>
-#include <string>
 #include <filesystem>
+#include <string>
 #include <sys/stat.h>
 #include <vector>
 
 #pragma comment(lib, "comdlg32.lib")
 
-namespace {
+namespace
+{
 
 constexpr int kWidth = 960;
 constexpr int kHeight = 900;
 
-bool fileExists(const std::string& path) {
-    struct stat st {};
+bool fileExists(const std::string &path)
+{
+    struct stat st{};
     return !path.empty() && ::stat(path.c_str(), &st) == 0;
 }
 
-std::string resolveChromePath() {
-    wchar_t executable[32768]{}; ::GetModuleFileNameW(nullptr,executable,32768);
+std::string resolveChromePath()
+{
+    wchar_t executable[32768]{};
+    ::GetModuleFileNameW(nullptr, executable, 32768);
     const std::vector<std::string> candidates = {
-        (std::filesystem::path(executable).parent_path()/"assets"/"audio_editor.ui.json").string(),
+        (std::filesystem::path(executable).parent_path() / "assets" / "audio_editor.ui.json").string(),
         "assets/audio_editor.ui.json",
         "AYRuntime/AYAudio/demo/audio_editor/assets/audio_editor.ui.json",
         "../AYRuntime/AYAudio/demo/audio_editor/assets/audio_editor.ui.json",
         "../../AYRuntime/AYAudio/demo/audio_editor/assets/audio_editor.ui.json",
     };
-    for (const std::string& path : candidates) {
-        if (fileExists(path)) {
+    for (const std::string &path : candidates)
+    {
+        if (fileExists(path))
+        {
             return path;
         }
     }
@@ -62,40 +68,44 @@ std::string resolveChromePath() {
 }
 
 // ACP path for ayio::File / CreateFileA (matches Gallery narrowForIo policy).
-std::string showOpenAudioDialog(HWND owner) {
+std::string showOpenAudioDialog(HWND owner)
+{
     char path[MAX_PATH] = {};
     OPENFILENAMEA ofn{};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = owner;
     ofn.lpstrFile = path;
     ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrFilter =
-        "Audio (*.wav;*.mp3;*.ogg)\0*.wav;*.mp3;*.ogg\0"
-        "All files (*.*)\0*.*\0";
+    ofn.lpstrFilter = "Audio (*.wav;*.mp3;*.ogg)\0*.wav;*.mp3;*.ogg\0"
+                      "All files (*.*)\0*.*\0";
     ofn.nFilterIndex = 1;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-    if (!::GetOpenFileNameA(&ofn)) {
+    if (!::GetOpenFileNameA(&ofn))
+    {
         return {};
     }
     return std::string(path);
 }
 
-struct AppState {
-    ayt::ui::UIManager* ui = nullptr;
-    ayt::audio::AudioEditorSession* session = nullptr;
-    ayt::render::Renderer* renderer = nullptr;
-    ayt::render::UIRenderBackend* uiBackend = nullptr;
-    ayt::device::DeviceManager* devices = nullptr;
+struct AppState
+{
+    ayt::ui::UIManager *ui = nullptr;
+    ayt::audio::AudioEditorSession *session = nullptr;
+    ayt::render::Renderer *renderer = nullptr;
+    ayt::render::UIRenderBackend *uiBackend = nullptr;
+    ayt::device::DeviceManager *devices = nullptr;
     int clientW = kWidth;
     int clientH = kHeight;
     bool running = true;
 };
 
-static HCURSOR cursorForHint(ayt::ui::UiCursorHint hint) {
+static HCURSOR cursorForHint(ayt::ui::UiCursorHint hint)
+{
     static const HCURSOR arrow = ::LoadCursorW(nullptr, IDC_ARROW);
     static const HCURSOR we = ::LoadCursorW(nullptr, IDC_SIZEWE);
     static const HCURSOR hand = ::LoadCursorW(nullptr, IDC_HAND);
-    switch (hint) {
+    switch (hint)
+    {
     case ayt::ui::UiCursorHint::SizeWe:
     case ayt::ui::UiCursorHint::SizeHorizontal:
         return we;
@@ -106,15 +116,17 @@ static HCURSOR cursorForHint(ayt::ui::UiCursorHint hint) {
     }
 }
 
-std::intptr_t handleMessage(AppState* state, unsigned msg, std::uintptr_t wParam,
-                            std::intptr_t lParam, bool& handled) {
+std::intptr_t handleMessage(AppState *state, unsigned msg, std::uintptr_t wParam, std::intptr_t lParam, bool &handled)
+{
     handled = false;
-    if (state == nullptr || state->ui == nullptr) {
+    if (state == nullptr || state->ui == nullptr)
+    {
         return 0;
     }
-    ayt::ui::UIManager& ui = *state->ui;
+    ayt::ui::UIManager &ui = *state->ui;
 
-    switch (msg) {
+    switch (msg)
+    {
     case WM_SETCURSOR: {
         ::SetCursor(cursorForHint(ui.getCursorHint()));
         handled = true;
@@ -123,93 +135,138 @@ std::intptr_t handleMessage(AppState* state, unsigned msg, std::uintptr_t wParam
     case WM_SIZE: {
         state->clientW = LOWORD(lParam);
         state->clientH = HIWORD(lParam);
-        if (state->clientW < 32) {
+        if (state->clientW < 32)
+        {
             state->clientW = 32;
         }
-        if (state->clientH < 32) {
+        if (state->clientH < 32)
+        {
             state->clientH = 32;
         }
-        ui.setClientSize(static_cast<float>(state->clientW),
-                         static_cast<float>(state->clientH));
-        if (state->renderer != nullptr) {
-            state->renderer->resize(static_cast<uint32_t>(state->clientW),
-                                   static_cast<uint32_t>(state->clientH));
+        ui.setClientSize(static_cast<float>(state->clientW), static_cast<float>(state->clientH));
+        if (state->renderer != nullptr)
+        {
+            state->renderer->resize(static_cast<uint32_t>(state->clientW), static_cast<uint32_t>(state->clientH));
         }
-        if (state->uiBackend != nullptr) {
-            state->uiBackend->setFramebufferSize(
-                static_cast<uint16_t>(state->clientW),
-                static_cast<uint16_t>(state->clientH));
+        if (state->uiBackend != nullptr)
+        {
+            state->uiBackend->setFramebufferSize(static_cast<uint16_t>(state->clientW),
+                                                 static_cast<uint16_t>(state->clientH));
         }
         handled = true;
         return 0;
     }
     case WM_MOUSEMOVE: {
-        ui.onMouseMove(static_cast<float>(GET_X_LPARAM(lParam)),
-                       static_cast<float>(GET_Y_LPARAM(lParam)));
+        const auto logical =
+            ui.physicalToLogical({static_cast<float>(GET_X_LPARAM(lParam)), static_cast<float>(GET_Y_LPARAM(lParam))});
+        if (state->session && state->session->handleMouseMove(logical.x, logical.y))
+        {
+            handled = true;
+            return 0;
+        }
+        ui.onMouseMove(static_cast<float>(GET_X_LPARAM(lParam)), static_cast<float>(GET_Y_LPARAM(lParam)));
         return 0;
     }
     case WM_LBUTTONDOWN: {
-        if (state->session && state->session->handleMouseButton(static_cast<float>(GET_X_LPARAM(lParam)),static_cast<float>(GET_Y_LPARAM(lParam)),0,true)) {
-            ::SetCapture(static_cast<HWND>(state->devices->window().getWindowHandle())); handled=true; return 0;
+        if (state->session &&
+            state->session->handleMouseButton(ui.physicalToLogical({static_cast<float>(GET_X_LPARAM(lParam)),
+                                                                    static_cast<float>(GET_Y_LPARAM(lParam))})
+                                                  .x,
+                                              ui.physicalToLogical({static_cast<float>(GET_X_LPARAM(lParam)),
+                                                                    static_cast<float>(GET_Y_LPARAM(lParam))})
+                                                  .y,
+                                              0, true))
+        {
+            ::SetCapture(static_cast<HWND>(state->devices->window().getWindowHandle()));
+            handled = true;
+            return 0;
         }
-        ui.onMouseButtonDown(static_cast<float>(GET_X_LPARAM(lParam)),
-                             static_cast<float>(GET_Y_LPARAM(lParam)), 0);
+        ui.onMouseButtonDown(static_cast<float>(GET_X_LPARAM(lParam)), static_cast<float>(GET_Y_LPARAM(lParam)), 0);
         handled = true;
         return 0;
     }
     case WM_LBUTTONUP: {
-        if (state->session && state->session->handleMouseButton(static_cast<float>(GET_X_LPARAM(lParam)),static_cast<float>(GET_Y_LPARAM(lParam)),0,false)) {
-            ::ReleaseCapture(); handled=true; return 0;
+        if (state->session &&
+            state->session->handleMouseButton(ui.physicalToLogical({static_cast<float>(GET_X_LPARAM(lParam)),
+                                                                    static_cast<float>(GET_Y_LPARAM(lParam))})
+                                                  .x,
+                                              ui.physicalToLogical({static_cast<float>(GET_X_LPARAM(lParam)),
+                                                                    static_cast<float>(GET_Y_LPARAM(lParam))})
+                                                  .y,
+                                              0, false))
+        {
+            ::ReleaseCapture();
+            handled = true;
+            return 0;
         }
-        ui.onMouseButtonUp(static_cast<float>(GET_X_LPARAM(lParam)),
-                           static_cast<float>(GET_Y_LPARAM(lParam)), 0);
+        ui.onMouseButtonUp(static_cast<float>(GET_X_LPARAM(lParam)), static_cast<float>(GET_Y_LPARAM(lParam)), 0);
         handled = true;
         return 0;
     }
+    case WM_MBUTTONDOWN:
+    case WM_MBUTTONUP: {
+        const bool down = msg == WM_MBUTTONDOWN;
+        if (state->session &&
+            state->session->handleMouseButton(ui.physicalToLogical({static_cast<float>(GET_X_LPARAM(lParam)),
+                                                                    static_cast<float>(GET_Y_LPARAM(lParam))})
+                                                  .x,
+                                              ui.physicalToLogical({static_cast<float>(GET_X_LPARAM(lParam)),
+                                                                    static_cast<float>(GET_Y_LPARAM(lParam))})
+                                                  .y,
+                                              2, down))
+        {
+            if (down)
+                ::SetCapture(static_cast<HWND>(state->devices->window().getWindowHandle()));
+            else
+                ::ReleaseCapture();
+            handled = true;
+            return 0;
+        }
+        return 0;
+    }
     case WM_RBUTTONDOWN: {
-        ui.onMouseButtonDown(static_cast<float>(GET_X_LPARAM(lParam)),
-                             static_cast<float>(GET_Y_LPARAM(lParam)), 1);
+        ui.onMouseButtonDown(static_cast<float>(GET_X_LPARAM(lParam)), static_cast<float>(GET_Y_LPARAM(lParam)), 1);
         handled = true;
         return 0;
     }
     case WM_RBUTTONUP: {
-        ui.onMouseButtonUp(static_cast<float>(GET_X_LPARAM(lParam)),
-                           static_cast<float>(GET_Y_LPARAM(lParam)), 1);
+        ui.onMouseButtonUp(static_cast<float>(GET_X_LPARAM(lParam)), static_cast<float>(GET_Y_LPARAM(lParam)), 1);
         handled = true;
         return 0;
     }
     case WM_MOUSEWHEEL: {
         constexpr float kPixelsPerNotch = 40.0f;
         const short raw = static_cast<short>(HIWORD(wParam));
-        const float deltaY =
-            -(static_cast<float>(raw) / static_cast<float>(WHEEL_DELTA))
-            * kPixelsPerNotch;
+        const float deltaY = -(static_cast<float>(raw) / static_cast<float>(WHEEL_DELTA)) * kPixelsPerNotch;
         POINT pt{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
-        if (state->devices != nullptr) {
-            HWND hwnd =
-                static_cast<HWND>(state->devices->window().getWindowHandle());
-            if (hwnd != nullptr) {
+        if (state->devices != nullptr)
+        {
+            HWND hwnd = static_cast<HWND>(state->devices->window().getWindowHandle());
+            if (hwnd != nullptr)
+            {
                 ::ScreenToClient(hwnd, &pt);
             }
         }
-        ui.onMouseWheel(static_cast<float>(pt.x), static_cast<float>(pt.y),
-                        deltaY);
+        ui.onMouseWheel(static_cast<float>(pt.x), static_cast<float>(pt.y), deltaY);
         handled = true;
         return 0;
     }
     case WM_KILLFOCUS:
     case WM_CANCELMODE:
-        if (state->session) state->session->releaseKeys();
+        if (state->session)
+            state->session->onFocusLost();
         return 0;
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN: {
-        if (!state->session || !state->session->handleKey(static_cast<int>(wParam),true)) ui.onKeyDown(static_cast<int>(wParam));
+        if (!state->session || !state->session->handleKey(static_cast<int>(wParam), true))
+            ui.onKeyDown(static_cast<int>(wParam));
         handled = true;
         return 0;
     }
     case WM_KEYUP:
     case WM_SYSKEYUP: {
-        if (!state->session || !state->session->handleKey(static_cast<int>(wParam),false)) ui.onKeyUp(static_cast<int>(wParam));
+        if (!state->session || !state->session->handleKey(static_cast<int>(wParam), false))
+            ui.onKeyUp(static_cast<int>(wParam));
         handled = true;
         return 0;
     }
@@ -221,15 +278,17 @@ std::intptr_t handleMessage(AppState* state, unsigned msg, std::uintptr_t wParam
 
 } // namespace
 
-int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
+{
     AllocConsole();
-    FILE* dummy = nullptr;
+    FILE *dummy = nullptr;
     freopen_s(&dummy, "CONOUT$", "w", stdout);
     freopen_s(&dummy, "CONOUT$", "w", stderr);
 
     ayt::audio::AudioSubSystem audio;
     audio.setBackend(ayt::audio::makeMiniaudioBackend());
-    if (!audio.initialize()) {
+    if (!audio.initialize())
+    {
         std::fprintf(stderr, "[AYAudio_AudioEditor] audio init failed\n");
         return 1;
     }
@@ -239,15 +298,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     cfg.window.title = "AYAudio Editor";
     cfg.window.width = kWidth;
     cfg.window.height = kHeight;
-    if (!devices.initialize(cfg)) {
+    if (!devices.initialize(cfg))
+    {
         std::fprintf(stderr, "[AYAudio_AudioEditor] DeviceManager init failed\n");
         audio.shutdown();
         return 1;
     }
 
-    ayt::device::WindowManager& window = devices.window();
+    ayt::device::WindowManager &window = devices.window();
     HWND hwnd = static_cast<HWND>(window.getWindowHandle());
-    if (hwnd == nullptr) {
+    if (hwnd == nullptr)
+    {
         std::fprintf(stderr, "[AYAudio_AudioEditor] no HWND\n");
         devices.shutdown();
         audio.shutdown();
@@ -261,7 +322,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     init.height = kHeight;
     init.vsync = true;
     init.msaa = 0;
-    if (!renderer.initialize(init)) {
+    if (!renderer.initialize(init))
+    {
         std::fprintf(stderr, "[AYAudio_AudioEditor] Renderer init failed\n");
         devices.shutdown();
         audio.shutdown();
@@ -269,15 +331,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     }
 
     ayt::render::UIRenderBackend uiBackend;
-    if (!uiBackend.initialize(renderer)) {
+    if (!uiBackend.initialize(renderer))
+    {
         std::fprintf(stderr, "[AYAudio_AudioEditor] UIRenderBackend init failed\n");
         renderer.shutdown();
         devices.shutdown();
         audio.shutdown();
         return 1;
     }
-    uiBackend.setFramebufferSize(static_cast<uint16_t>(kWidth),
-                                 static_cast<uint16_t>(kHeight));
+    uiBackend.setFramebufferSize(static_cast<uint16_t>(kWidth), static_cast<uint16_t>(kHeight));
 
     ayt::ui::UIManager ui;
     ui.initialize(&uiBackend);
@@ -293,9 +355,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     state.clientH = kHeight;
 
     const std::string chromePath = resolveChromePath();
-    if (!ui.loadLayout(chromePath)) {
-        std::fprintf(stderr, "[AYAudio_AudioEditor] failed to load chrome: %s\n",
-                     chromePath.c_str());
+    if (!ui.loadLayout(chromePath))
+    {
+        std::fprintf(stderr, "[AYAudio_AudioEditor] failed to load chrome: %s\n", chromePath.c_str());
         ui.shutdown();
         uiBackend.shutdown();
         renderer.shutdown();
@@ -310,7 +372,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     session.setAudio(&audio);
     session.setAssetRoot(std::filesystem::path(chromePath).parent_path().string());
     session.setPathPicker([hwnd]() { return showOpenAudioDialog(hwnd); });
-    if (!session.attach(ui)) {
+    if (!session.attach(ui))
+    {
         std::fprintf(stderr, "[AYAudio_AudioEditor] session.attach failed\n");
         ui.shutdown();
         uiBackend.shutdown();
@@ -322,8 +385,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 
     window.setWindowCloseCallback([&state]() { state.running = false; });
     window.setWindowMessageCallback(
-        [&state](unsigned msg, std::uintptr_t wParam, std::intptr_t lParam,
-                 bool& handled) -> std::intptr_t {
+        [&state](unsigned msg, std::uintptr_t wParam, std::intptr_t lParam, bool &handled) -> std::intptr_t {
             return handleMessage(&state, msg, wParam, lParam, handled);
         });
 
@@ -334,19 +396,21 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     ::QueryPerformanceFrequency(&qpcFreq);
     ::QueryPerformanceCounter(&qpcPrev);
 
-    while (state.running && window.isWindowValid()) {
+    while (state.running && window.isWindowValid())
+    {
         devices.pollEvents();
 
         LARGE_INTEGER qpcNow{};
         ::QueryPerformanceCounter(&qpcNow);
-        float dt = static_cast<float>(
-            static_cast<double>(qpcNow.QuadPart - qpcPrev.QuadPart)
-            / static_cast<double>(qpcFreq.QuadPart));
+        float dt = static_cast<float>(static_cast<double>(qpcNow.QuadPart - qpcPrev.QuadPart) /
+                                      static_cast<double>(qpcFreq.QuadPart));
         qpcPrev = qpcNow;
-        if (dt < 0.0f) {
+        if (dt < 0.0f)
+        {
             dt = 0.0f;
         }
-        if (dt > 0.1f) {
+        if (dt > 0.1f)
+        {
             dt = 0.1f;
         }
 
@@ -357,11 +421,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         clear.g = 0.10f;
         clear.b = 0.12f;
         clear.a = 1.0f;
-        renderer.beginCompositeFrame(clear,
-                                     static_cast<uint16_t>(state.clientW),
-                                     static_cast<uint16_t>(state.clientH));
-        uiBackend.setFramebufferSize(static_cast<uint16_t>(state.clientW),
-                                     static_cast<uint16_t>(state.clientH));
+        renderer.beginCompositeFrame(clear, static_cast<uint16_t>(state.clientW), static_cast<uint16_t>(state.clientH));
+        uiBackend.setFramebufferSize(static_cast<uint16_t>(state.clientW), static_cast<uint16_t>(state.clientH));
         ui.update(dt);
         ui.layout();
         ui.populateFrame();

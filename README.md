@@ -69,12 +69,28 @@ Public state mutation and callback rendering are serialized; the callback uses
 a try-lock and emits silence on contention rather than waiting. Preload outside
 live performance; this is not a hard realtime/no-dropout guarantee.
 
-Audio Editor (both hosts): A W S E D F T G Y H U J K plays C..C one octave above;
-Space is sustain, mouse presses play immediately, and focus loss releases notes.
-Octave buttons cover C1..C6 starts. Preview volume/velocity, piano/sine switching,
-and Load Sample are available. Imported samples use the displayed octave's C as
-root and cover root-12..root+24 subject to pitch limits. Preview pause/stop affect
-only session voices; bus/effect controls deliberately affect the global mix.
+Audio Editor (both hosts) has three pages: instrument performance, single-resource
+editing and engine mixing. The piano appears only in performance. Its grip or
+middle button pans the key strip; the wheel changes key width around the cursor.
+A W S E D F T G Y H U J K plays C..C; Space sustains. Signed semitone transpose
+supports -24..+24, updates displayed/played pitches and releases held notes before
+changing mappings. Numeric entry suppresses note-on. Focus loss releases notes
+and modifier state. Performance presets edit gain/attack/release parameters.
+`SampleInstrument::setBus` selects the bus for future notes (SFX by default).
+
+Mixer rows are name | slider | editable percentage. Master/Music/SFX/UI/Voice
+and reverb return address the current shared engine and are session values, not
+automatically saved project/OS settings. A persistent vertical L/R meter reads
+`AudioEngine::outputLevels`: actual post-mix sample peaks before final clipping,
+with dBFS display, decaying peak hold and overload indication. It is not RMS/LUFS.
+
+The resource page decodes real PCM waveform peaks, previews source intervals,
+and edits gain/fades with undo/redo. Save writes the existing schema-v2
+`*.timeline.json` atomically; source PCM remains intact. A selected interval
+becomes a clip at timeline 0 with sourceOffset; timeline preview is 0..clip length.
+Complex/unsupported sidecars are read-only. MIDI, multi-track recording, rendered
+audio export, arbitrary volume envelopes, saved preset libraries and a separate
+editor preview bus remain disabled placeholders.
 
 Default C1..C7 piano samples are Salamander Grand Piano by Alexander Holm,
 CC BY 3.0, redistributed as a Tonejs/audio MP3 subset. Attribution, upstream

@@ -35,6 +35,14 @@ enum class AudioBus : uint8_t {
     Count,
 };
 
+/// Display telemetry from the most recent audio callback, before final clipping.
+/// Channels are approximate independent readings; this is not a loudness meter.
+struct AudioOutputLevels {
+    float left = 0, right = 0;
+    bool clipped = false;
+    uint64_t block = 0;
+};
+
 // ===== PCM descriptor (game thread → engine) =====
 
 enum class AudioSampleFormat : uint8_t {

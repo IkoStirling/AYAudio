@@ -14,6 +14,20 @@
 #include <AYResource/Loader/AudioLoader.h>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <stdexcept>
+#include <nlohmann/json.hpp>
+#include <AYIO/File.h>
+#include <AYUI/Box.h>
+#include <AYUI/Panel.h>
+#include <AYUI/ScrollView.h>
+#include <AYUI/LeafWidget.h>
+#include <AYUI/TabControl.h>
+#include <AYUI/CheckBox.h>
+#include <AYUI/ComboBox.h>
+#include <AYUI/TextInput.h>
+#include <AYUI/Theme.h>
+#include <AYUI/Authoring/NumericFields.h>
 
 namespace ayt::audio {
 namespace {
@@ -33,6 +47,10 @@ void setLabelValue(ayt::ui::TextLabel* label, float v, bool asInt) {
 
 } // namespace
 
+#include "AudioWorkbench.inl"
+
+AudioEditorSession::AudioEditorSession() = default;
+
 AudioEditorSession::~AudioEditorSession() {
     detach();
 }
@@ -40,27 +58,29 @@ AudioEditorSession::~AudioEditorSession() {
 bool AudioEditorSession::attach(ayt::ui::UIManager& ui) {
     detach();
     _ui = &ui;
+    auto* mount = _ui->findById("audio_editor_root");
+    if (!mount) return false;
+    _workbench = std::make_unique<Workbench>(*this, mount);
     if (_audio == nullptr || _audio->engine() == nullptr
         || !_audio->engine()->isInitialized()) {
         setStatus(L"No AudioSubSystem / engine — register audio or drop -no-audio");
-        bindChrome(); // still bind so UI is not dead; actions no-op safely
+        // Workbench stays interactive while the engine is unavailable.
         return true;
     }
 
     if (!ensureClips()) {
         setStatus(L"Clip register failed");
-        bindChrome();
+        // No global engine mutation on attach.
         return true;
     }
 
-    bindChrome();
     refreshStatus();
     return true;
 }
 
 void AudioEditorSession::detach() {
     releaseResources();
-    unbindChrome(); _ui=nullptr; _status=nullptr; _streamTrackLabel=nullptr;
+    unbindChrome(); _workbench.reset(); _ui=nullptr; _status=nullptr; _streamTrackLabel=nullptr;
 }
 
 void AudioEditorSession::tick(float dt) {
@@ -70,6 +90,7 @@ void AudioEditorSession::tick(float dt) {
         if ((_tickCount % 60) == 0) {
             setStatus(L"Audio engine stopped — reopen Audio Editor to re-init");
         }
+        if (_workbench) _workbench->tick(dt);
         ++_tickCount;
         return;
     }
@@ -77,6 +98,7 @@ void AudioEditorSession::tick(float dt) {
     if (_driveAudioUpdate && _audio != nullptr) {
         _audio->update(dt);
     }
+    if (_workbench) _workbench->tick(dt);
     ++_tickCount;
     if ((_tickCount % 15) == 0) {
         refreshStatus();
@@ -89,6 +111,7 @@ AudioEngine* AudioEditorSession::liveEngine() const {
     return engine && engine->isInitialized() ? engine : nullptr;
 }
 void AudioEditorSession::releaseResources() {
+    if (_workbench) _workbench->releaseAudio();
     auto* engine=liveEngine();
     const bool same=engine && engine==_boundEngine && engine->lifecycleGeneration()==_engineGeneration;
     if (!same && _instrument) _instrument->abandon();
@@ -387,28 +410,13 @@ void AudioEditorSession::refreshTracks() {
 }
 
 void AudioEditorSession::refreshStatus() {
-    AudioEngine* eng = liveEngine();
-    if (eng == nullptr) {
-        return;
-    }
-    _ownedVoices.erase(std::remove_if(_ownedVoices.begin(),_ownedVoices.end(),[&](VoiceHandle h){VoiceRuntime v; return !eng->voiceState(h,v);}),_ownedVoices.end());
-    _ducked=eng->duckingState().depthDb<0; _reverbPreset=eng->reverbPreset();
-    _refreshing=true;
-    auto sync=[&](const char* id,float value){if (_ui) if (auto* slider=dynamic_cast<ayt::ui::Slider*>(_ui->findById(id))) slider->setValue(value);};
-    sync("sld_master",eng->masterGain()*100); sync("sld_music",eng->busGain(AudioBus::Music)*100); sync("sld_sfx",eng->busGain(AudioBus::Sfx)*100); sync("sld_timescale",eng->timeScale()*100);
-    sync("sld_reverb",eng->reverbReturn()*100);
-    _refreshing=false;
-    wchar_t buf[256];
-    std::swprintf(buf, 256,
-                  L"voices=%u  underruns=%llu  scale=%.2f  duck=%s  reverbP=%u  "
-                  L"paused=%s  stream=%s",
-                  eng->activeVoiceCount(),
-                  static_cast<unsigned long long>(eng->streamUnderrunCount()),
-                  eng->timeScale(), _ducked ? L"on" : L"off",
-                  static_cast<unsigned>(_reverbPreset),
-                  _paused ? L"yes" : L"no",
-                  _stream.voice != InvalidVoice ? L"yes" : L"no");
-    setStatus(buf);
+    auto* eng=liveEngine();
+    if (!eng) {setStatus(L"音频引擎不可用");return;}
+    if(eng->isPaused())setStatus(L"引擎输出已暂停 · 混音器中恢复");
+    else if(eng->masterGain()==0)setStatus(L"总输出为 0% · 已静音");
+    else if(_workbench && _workbench->tabs->getSelectedIndex()==0 && eng->busGain(Workbench::bus(_workbench->instrumentBus->getSelectedIndex()))==0)setStatus(L"演奏分组为 0% · 已静音");
+    else if(_workbench && _workbench->tabs->getSelectedIndex()==0 && _previewGain==0)setStatus(L"演奏音量为 0% · 已静音");
+    else setStatus(eng->activeVoiceCount()?L"输出就绪 · 正在发声":L"输出就绪 · 等待演奏或试听");
 }
 
 void AudioEditorSession::playBeep(AudioClipId clip, AudioBus bus) {
@@ -564,6 +572,7 @@ void AudioEditorSession::buildInstrument(bool sine) {
         if (clip) { _instrumentClips.push_back(clip); _instrument->addRegion({clip,note,std::max(0,note-6),std::min(127,note+6)}); }
     }
     if (!sine && fallback) _instrumentName=L"Piano (generated fallback)";
+    if (_workbench) {_workbench->piano->low=18;_workbench->piano->high=102;_workbench->applyInstrument();}
 }
 void AudioEditorSession::loadSample() {
     if (!_pathPicker || !ensureClips()) return;
@@ -576,42 +585,58 @@ void AudioEditorSession::loadSample() {
     _instrument.reset(); for (auto c:_instrumentClips) e->releaseClip(c); _instrumentClips={clip};
     _instrument=std::make_unique<SampleInstrument>(*e,16); _instrument->setGain(_previewGain); _instrument->setPaused(_paused);
     const int root=(_octave+1)*12; _instrument->addRegion({clip,root,std::max(0,root-12),std::min(127,root+24)});
-    _instrumentName=L"Sample (root C"+std::to_wstring(_octave)+L")"; updateKeys();
+    _instrumentName=L"Sample (root C"+std::to_wstring(_octave)+L")";
+    if (_workbench) {_workbench->piano->low=std::max(0,root-12);_workbench->piano->high=std::min(127,root+24);_workbench->applyInstrument();}
+    updateKeys();
+}
+void AudioEditorSession::pressPitch(int pitch,bool keyboard,bool down) {
+    if (pitch<0 || pitch>127) return;
+    if (down) { if (!ensureClips() || !_instrument) return; }
+    else if (!_instrument || liveEngine()!=_boundEngine || !liveEngine() || liveEngine()->lifecycleGeneration()!=_engineGeneration) {
+        (keyboard ? _keyboard[pitch] : _mouse[pitch])=false; return;
+    }
+    const bool before=_keyboard[pitch] || _mouse[pitch];
+    (keyboard ? _keyboard[pitch] : _mouse[pitch])=down;
+    const bool after=_keyboard[pitch] || _mouse[pitch];
+    if (!before && after && !_instrument->noteOn(pitch,_velocity)) {
+        (keyboard ? _keyboard[pitch] : _mouse[pitch])=false;
+        setStatus(L"音符不可用：超出音源范围或声部容量");
+    }
+    if (before && !after) _instrument->noteOff(pitch);
+    updateKeys();
+    if (_workbench) _workbench->noteStatus->setText(L"实际音高："+workbench::noteName(pitch));
 }
 void AudioEditorSession::pressNote(int index,bool keyboard,bool down) {
-    if (index<0 || index>=13 || !ensureClips() || !_instrument) return;
-    const bool before=_keyboard[index] || _mouse[index];
-    (keyboard ? _keyboard[index] : _mouse[index])=down;
-    const bool after=_keyboard[index] || _mouse[index];
-    const int note=(_octave+1)*12+index;
-    if (!before && after && !_instrument->noteOn(note,_velocity)) setStatus(L"Note unavailable: sample range or voice capacity");
-    if (before && !after) _instrument->noteOff(note);
-    updateKeys();
+    if (index>=0 && index<13) pressPitch((_octave+1)*12+index+(_workbench?_workbench->shift:0),keyboard,down);
 }
 bool AudioEditorSession::handleKey(int key,bool pressed) {
     constexpr int keys[13]={'A','W','S','E','D','F','T','G','Y','H','U','J','K'};
+    if (!_workbench || _workbench->tabs->getSelectedIndex()!=0 || !_workbench->keyboardEnabled->isChecked()) return false;
     if (pressed && _ui && ((_ui->getFocusedWidget() && _ui->getFocusedWidget()->isTextEditingWidget()) || (_ui->getModifiers()&6u))) return false;
-    if (key==32) {
-        if (!ensureClips()) return false;
-        _spaceDown=pressed; if (_instrument) _instrument->setSustain(pressed || _pedalLatch); updateKeys(); return true;
-    }
-    for (int i=0;i<13;++i) if (key==keys[i]) {
-        if (!pressed && !_keyboard[i]) return false;
-        pressNote(i,true,pressed); return true;
-    }
+    if (key==32) { if (!ensureClips()) return false;_spaceDown=pressed;if (_instrument) _instrument->setSustain(pressed||_pedalLatch);updateKeys();return true; }
+    for (int i=0;i<13;++i) if (key==keys[i]) {const int pitch=(_octave+1)*12+i+_workbench->shift;if(pitch<0||pitch>127)return false;if(!pressed&&!_keyboard[pitch])return false;pressPitch(pitch,true,pressed);return true;}
     return false;
 }
 bool AudioEditorSession::handleMouseButton(float x,float y,int button,bool pressed) {
-    if (button!=0 || !_ui) return false;
-    if (!pressed && _mouseKey>=0) {const int key=_mouseKey;_mouseKey=-1;pressNote(key,false,false);return true;}
-    constexpr int hitOrder[]={1,3,6,8,10,0,2,4,5,7,9,11,12};
-    if (pressed) for (int i:hitOrder) {
-        const auto id="piano_key_"+std::to_string(i); auto* w=_ui->findById(id);
-        if (w && w->hitTest({x,y})) { _mouseKey=i;pressNote(i,false,true);return true; }
+    if (!_workbench || _workbench->tabs->getSelectedIndex()!=0) return false;
+    if (pressed) for (auto* parent=_workbench->piano->getParent();parent;parent=parent->getParent()) {
+        if (auto* scroll=dynamic_cast<ayt::ui::ScrollView*>(parent);scroll&&!scroll->getClientRect().contains({x,y}))return false;
     }
-    return false;
+    const ayt::ui::UIMouseEvent e({x,y},button);
+    return pressed?_workbench->piano->onMouseButtonDown(e):_workbench->piano->onMouseButtonUp(e);
 }
+bool AudioEditorSession::handleMouseMove(float x,float y) {
+    return _workbench && _workbench->piano->onMouseMove({{x,y}});
+}
+void AudioEditorSession::onFocusLost() {
+    releaseKeys();
+    if (_ui) {_ui->cancelCapture();_ui->onKeyUp(16);_ui->onKeyUp(17);_ui->onKeyUp(18);}
+}
+bool AudioEditorSession::openResource(const std::string& path) {return _workbench&&_workbench->loadResource(path);}
+ayt::math::FRectangle AudioEditorSession::pianoKeyBounds(int note) const {return _workbench?_workbench->piano->keyBounds(note):ayt::math::FRectangle{};}
+
 void AudioEditorSession::releaseKeys() {
+    if (_workbench) _workbench->piano->cancel();
     _keyboard.fill(false); _mouse.fill(false); _mouseKey=-1; _spaceDown=false; _pedalLatch=false;
     if (_instrument) {
         const auto* e=liveEngine();
@@ -620,28 +645,10 @@ void AudioEditorSession::releaseKeys() {
     } updateKeys();
 }
 void AudioEditorSession::updateKeys() {
-    if (!_ui) return;
-    constexpr const wchar_t* notes[]={L"C",L"C#",L"D",L"D#",L"E",L"F",L"F#",L"G",L"G#",L"A",L"A#",L"B",L"C"};
-    constexpr const wchar_t* keys[]={L"A",L"W",L"S",L"E",L"D",L"F",L"T",L"G",L"Y",L"H",L"U",L"J",L"K"};
-    if (auto* sheet=ayt::ui::StyleManager::get().getStyleSheet()) {
-        if (!sheet->containsStyle("audio.key.white")) {
-            auto style=sheet->getComputedStyle("button_default");
-            style.bgToken.clear(); style.textColorToken.clear(); style.borderColorToken.clear();
-            style.backgroundStates={}; style.backgroundTransition={};
-            style.backgroundColor={0.88f,0.88f,0.90f,1}; style.textColor={0.12f,0.12f,0.15f,1};
-            sheet->setStyle("audio.key.white",style);
-            style.backgroundColor={0.12f,0.12f,0.15f,1}; style.textColor={0.96f,0.96f,0.98f,1};
-            sheet->setStyle("audio.key.black",style);
-            style.backgroundColor={0.20f,0.55f,0.90f,1}; sheet->setStyle("audio.key.down",style);
-        }
-    }
-    for (int i=0;i<13;++i) if (auto* b=dynamic_cast<ayt::ui::Button*>(_ui->findById("piano_key_"+std::to_string(i)))) {
-        const bool down=_keyboard[i] || _mouse[i];
-        b->setText((down ? std::wstring(L"● ") : L"")+notes[i]+std::to_wstring(_octave+(i==12 ? 1:0))+L"["+keys[i]+L"]");
-        b->setStyleId(down ? "audio.key.down" : (i==1||i==3||i==6||i==8||i==10 ? "audio.key.black" : "audio.key.white"));
-    }
-    if (auto* l=dynamic_cast<ayt::ui::TextLabel*>(_ui->findById("lbl_instrument"))) l->setText(_instrumentName+L" | C"+std::to_wstring(_octave)+L" | Space: sustain");
-    if (auto* b=dynamic_cast<ayt::ui::Button*>(_ui->findById("btn_sustain"))) b->setText((_pedalLatch||_spaceDown) ? L"Sustain ON" : L"Sustain OFF");
+    if (!_workbench) return;
+    auto* p=_workbench->piano;p->octave=_octave;p->transpose=_workbench->shift;p->markDirty();
+    _workbench->instrument->setText(_instrumentName+L" · 键盘 C"+std::to_wstring(_octave)+L" · 移调 "+std::to_wstring(_workbench->shift)+L" 半音");
+    if (auto* b=dynamic_cast<ayt::ui::Button*>(_ui->findById("btn_sustain"))) b->setText((_pedalLatch||_spaceDown)?L"延音开启":L"延音关闭");
 }
 
 } // namespace ayt::audio

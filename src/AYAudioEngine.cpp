@@ -348,6 +348,7 @@ void AudioEngine::shutdown() {
     }
 
     _mixer.reset();
+    publishOutputLevels({});
     _clips.clear();
     _commands.shutdown();
 
@@ -971,10 +972,12 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
     if (!output || !frameCount) return;
     std::unique_lock<std::recursive_mutex> stateLock(_stateMutex, std::try_to_lock);
     if (!stateLock.owns_lock()) {
+        publishOutputLevels({});
         std::memset(output,0,static_cast<size_t>(frameCount)*_settings.channels*sizeof(float));
         return;
     }
     if (!_initialized || output == nullptr || frameCount == 0) {
+        publishOutputLevels({});
         std::memset(output,0,static_cast<size_t>(frameCount)*_settings.channels*sizeof(float));
         return;
     }
@@ -986,21 +989,27 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
     }
 
     if (_paused) {
+        publishOutputLevels({});
         std::memset(output, 0, frameCount * _settings.channels * sizeof(float));
         return;
     }
 
     if (frameCount>4096) {
+        AudioOutputLevels total;
         for (uint32_t offset=0;offset<frameCount;) {
             const uint32_t count=std::min<uint32_t>(4096,frameCount-offset);
             render(output+static_cast<size_t>(offset)*_settings.channels,count); offset+=count;
+            const auto part=outputLevels();
+            total.left=std::max(total.left,part.left);total.right=std::max(total.right,part.right);total.clipped|=part.clipped;
         }
+        publishOutputLevels(total);
         return;
     }
     // Build per-voice render context list. Voices that finished in a prior
     // render call are recycled at the start of this one.
     constexpr uint32_t kMaxVoicesPerRender = 64;
     if (_voices.size() > kMaxVoicesPerRender) {
+        publishOutputLevels({});
         return; // safety guard; settings.maxVoices should be ≤ 64 for v0
     }
 
@@ -1094,6 +1103,7 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
         sources[i] = &renderEnvelope; userData[i] = &envelopes[i];
     }
     _mixer.mix(output, frameCount, voiceSnapshot, sources, userData, activeCount);
+    publishOutputLevels(_mixer.outputLevels());
 
     // v2.0b: integrate duck envelope AFTER mix() (which populated the bus
     // probe inside its per-voice loop). dt = frames / sampleRate seconds.

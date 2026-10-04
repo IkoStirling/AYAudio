@@ -55,6 +55,7 @@ public:
     void setMasterGain(float linearGain);
     float getBusGain(AudioBus bus) const;
     float getMasterGain() const { return _masterGain; }
+    AudioOutputLevels outputLevels() const { return _outputLevels; }
 
     // ===== Ducking (v2.0b) =====
     void setDucking(float depthDb, float attackPerSec, float releasePerSec);
@@ -109,6 +110,7 @@ private:
 
     std::array<BusState, static_cast<size_t>(AudioBus::Count)> _buses{};
     float _masterGain = 1.0f;
+    AudioOutputLevels _outputLevels{};
     uint16_t _outputChannels = 2;
     uint32_t _sampleRate = 48000;
 

@@ -34,12 +34,15 @@ public:
     void setPaused(bool paused);
     void setGain(float gain);
     void setEnvelope(float attackSeconds, float releaseSeconds);
+    /// Changes routing for future notes; active notes retain their original bus.
+    void setBus(AudioBus bus) { if (bus < AudioBus::Count) _bus = bus; }
     uint32_t activeNotes() const;
 private:
     struct Note { int pitch; VoiceHandle voice; float velocity, regionGain; bool held = true, released = false; };
     bool valid() const;
     void reap();
     void release(Note& note);
+    AudioBus _bus = AudioBus::Sfx;
     AudioEngine* _engine;
     uint64_t _generation;
     uint32_t _polyphony;

@@ -24,6 +24,7 @@ endif()
 # ---------------------------------------------------------------------------
 # AYAudio_AudioEditor — AYUI mixer desk (shared session with AYEditor)
 # ---------------------------------------------------------------------------
+find_package(nlohmann_json CONFIG REQUIRED)
 set(AY_SHADER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../AYShader")
 include("${AY_SHADER_ROOT}/cmake/AYBgfx.cmake")
 
@@ -40,8 +41,10 @@ target_include_directories(AYAudio_AudioEditor PRIVATE
 target_link_libraries(AYAudio_AudioEditor PRIVATE
     AYAudio
     AYUI
+    AYUICurveEditor
     AYRenderer
     AYDevice
+    nlohmann_json::nlohmann_json
 )
 
 if(WIN32)

@@ -529,3 +529,33 @@ PCM layout to derive source duration.
 The default instrument loads cooked C1..C7 .aud assets first, so Release does not
 depend on the development loose MP3 loader. Original samples and attribution
 remain in AssetRepo; import_tool produces the cooked PCM copied by the manifest.
+
+### Shared workbench and output telemetry (2026-10-04)
+
+Both native hosts load a small mount panel, then the shared session owns a
+programmatically constructed workbench subtree. TabControl owns independent
+scroll pages; a persistent narrow right column draws the stereo meter. Free
+mount anchors explicitly disable Box-managed position/size. Piano is a LeafWidget
+over MIDI 21..108 with cursor-anchored width zoom, pan and mouse glissando.
+Physical pointer coordinates are converted to UI logical coordinates by hosts.
+Changing octave/transpose/tab/routing or losing focus releases held notes.
+Transpose is a semitone offset, not a change to source-region roots; unsupported
+notes are shaded. Keyboard and pointer note gates combine per actual MIDI pitch.
+
+AudioMixer measures absolute L/R sample peaks after gains/effects and before
+clamping. Mono mirrors L into R. AudioEngine publishes approximate independent
+atomic display fields and a monotonically increasing callback block serial;
+silence/paused/contended callbacks and shutdown clear readings. Render blocks
+larger than scratch capacity aggregate chunk peaks. The UI applies visual decay
+and a short overload hold, clears stale readings, and labels dBFS. This telemetry
+is neither a coherent voice-state snapshot nor integrated loudness measurement.
+
+Resource waveforms use validated decoded PCM and own clip/voice registrations.
+The editor uses the existing timeline-v2 fields, not a new format. One clip at
+timeline 0 stores sourceOffset/duration/gain/fades; timeline preview starts at 0,
+so the main document does not apply sourceOffset twice. Read-only fallback
+protects unsupported schemas, keyframes, multiple clips and nonzero timeline
+starts. Atomic sidecar writes preserve original audio. Fade durations are bounded
+to source selection length when dragging. Undo/redo stores validated edits;
+changing resource routes stops only that resource voice. Preset library, export,
+envelope authoring and a dedicated Preview bus are visibly disabled.

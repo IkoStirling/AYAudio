@@ -463,4 +463,32 @@ TEST_SUITE(AudioEngineTests)
         CHECK(posAtPitch2 > posAtPitch1 + (posAtPitch1 / 2));
         engine.shutdown();
     }
+
+    TEST_CASE(OutputPeaksSeparateChannelsAndReportPreClampOverload) {
+        AudioEngine engine;auto settings=defaultSettings();settings.reverbReturn=0;
+        CHECK(engine.initialize(settings));
+        std::vector<float> pcm(128,0);for(size_t i=0;i<pcm.size();i+=2)pcm[i]=0.9f;
+        AudioClipDesc desc;desc.channels=2;desc.frameCount=64;desc.pcmData=pcm.data();
+        const auto voice=engine.play(engine.registerClip(desc),AudioBus::Sfx,{},2,true);
+        float out[32]{};engine.render(out,16);auto levels=engine.outputLevels();
+        CHECK(levels.left>1);CHECK(levels.right==0);CHECK(levels.clipped);CHECK(out[0]==1);
+        const auto block=levels.block;engine.pause();engine.render(out,16);levels=engine.outputLevels();
+        CHECK(levels.block>block);CHECK(levels.left==0);CHECK(levels.right==0);CHECK(!levels.clipped);
+        engine.resume();engine.setMasterGain(0);engine.render(out,16);CHECK(engine.outputLevels().left==0);
+        engine.shutdown();CHECK(engine.outputLevels().left==0);
+    }
+    TEST_CASE(MonoOutputTelemetryMirrorsBothChannels) {
+        AudioEngine engine;auto settings=defaultSettings();settings.channels=1;settings.reverbReturn=0;
+        CHECK(engine.initialize(settings));engine.play(engine.registerClip(makeSineClip(64,.3f)));
+        float out[8]{};engine.render(out,8);const auto levels=engine.outputLevels();
+        CHECK(levels.left>0);CHECK(levels.left==levels.right);CHECK(!levels.clipped);
+    }
+
+    TEST_CASE(LargeOutputBlockRetainsPeakFromFirstChunk) {
+        AudioEngine engine;auto settings=defaultSettings();settings.reverbReturn=0;CHECK(engine.initialize(settings));
+        std::vector<float> pcm(5000,0);pcm[0]=.8f;
+        AudioClipDesc desc;desc.channels=1;desc.frameCount=5000;desc.pcmData=pcm.data();
+        engine.play(engine.registerClip(desc));std::vector<float> output(10000);engine.render(output.data(),5000);
+        CHECK(engine.outputLevels().left>0);CHECK(engine.outputLevels().left==engine.outputLevels().right);
+    }
 TEST_SUITE_END

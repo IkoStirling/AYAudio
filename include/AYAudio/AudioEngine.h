@@ -78,6 +78,16 @@ public:
     bool voiceState(VoiceHandle voice, VoiceRuntime& out) const;
     bool voiceStateAt(uint32_t index, VoiceRuntime& out) const;
     uint64_t lifecycleGeneration() const { return _lifecycleGeneration; }
+    /// Lock-free display telemetry: raw per-channel sample peaks before output clamping.
+    /// Mono is mirrored to L/R. Values above 1 indicate clipping, not RMS/LUFS.
+    AudioOutputLevels outputLevels() const {
+        AudioOutputLevels value;
+        value.block = _meterBlock.load(std::memory_order_acquire);
+        value.left = _meterLeft.load(std::memory_order_relaxed);
+        value.right = _meterRight.load(std::memory_order_relaxed);
+        value.clipped = _meterClipped.load(std::memory_order_relaxed);
+        return value;
+    }
     float masterGain() const;
     float busGain(AudioBus bus) const;
     float reverbReturn() const;
@@ -250,6 +260,15 @@ private:
     AudioCommandQueue _commands;
     AudioClipRegistry _clips;
     AudioMixer _mixer;
+    std::atomic<float> _meterLeft{0}, _meterRight{0};
+    std::atomic<bool> _meterClipped{false};
+    std::atomic<uint64_t> _meterBlock{0};
+    void publishOutputLevels(const AudioOutputLevels& value) {
+        _meterLeft.store(value.left, std::memory_order_relaxed);
+        _meterRight.store(value.right, std::memory_order_relaxed);
+        _meterClipped.store(value.clipped, std::memory_order_relaxed);
+        _meterBlock.fetch_add(1, std::memory_order_release);
+    }
 
     std::unique_ptr<IAudioBackend> _backend;
 
