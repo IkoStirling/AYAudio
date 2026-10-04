@@ -112,8 +112,8 @@ already cached an empty mount panel. Tab changes also recalculate immediately;
 no window resize or per-frame layout call is required. The EditorAudioTests
 suite covers native/standalone load order, reattachment and tab switching.
 
-Performance shortcuts: Left Shift temporarily adds two semitones; Left Alt
-subtracts two, and holding both cancels. Z X C V B N M comma play the white
+Performance shortcuts: Left Shift temporarily adds one octave (12 semitones); Left Alt
+subtracts one octave, and holding both cancels. Z X C V B N M comma play the white
 keys C..C one octave below the main row. Temporary offsets add to fixed
 transpose on note-on; held notes retain their original pitch until release.
 Focus loss clears the temporary state. Right modifiers and text editing do not

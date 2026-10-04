@@ -615,7 +615,7 @@ void AudioEditorSession::pressNote(int index,bool keyboard,bool down) {
     if (index>=0 && index<13) pressPitch((_octave+1)*12+index+(_workbench?_workbench->shift:0),keyboard,down);
 }
 int AudioEditorSession::effectiveTranspose() const {
-    return (_workbench ? _workbench->shift : 0) + (_leftShift ? 2 : 0) - (_leftAlt ? 2 : 0);
+    return (_workbench ? _workbench->shift : 0) + (_leftShift ? 12 : 0) - (_leftAlt ? 12 : 0);
 }
 bool AudioEditorSession::handleKey(int key, bool pressed) {
     if (key < 0 || key >= static_cast<int>(_keyPitches.size())) return false;

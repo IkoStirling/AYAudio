@@ -573,7 +573,7 @@ including a different primary UIManager being active and repeated attachment.
 ### Performance shortcuts and compact telemetry (2026-10-04)
 
 Physical keyboard gates latch actual note-on MIDI pitches in a 256-entry table.
-Left Shift/Alt temporary offsets are +2/-2 semitones, compose additively and
+Left Shift/Alt temporary offsets are +12/-12 semitones (one octave), compose additively and
 affect new presses; key-up uses the latched pitch even if modifiers/focus have
 changed. Auto-repeat does not create voices. Multiple physical bindings for
 one pitch share the keyboard gate, so releasing upper A cannot stop lower

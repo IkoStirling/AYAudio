@@ -653,7 +653,7 @@ struct AudioEditorSession::Workbench
             110);
         button(keys, L"释放全部音符", "btn_stop_all", [this] { s.releaseKeys(); }, 140);
         keys->addWidget(label(L"Space：延音"));
-        performance->addWidget(label(L"左 Shift：临时 +2 半音  |  左 Alt：临时 −2 半音  |  同时按住：抵消"), 24);
+        performance->addWidget(label(L"左 Shift：临时升一个八度  |  左 Alt：临时降一个八度  |  同时按住：抵消"), 24);
         performance->addWidget(label(L"下排 Z X C V B N M ,：低八度白键（C 到 C）"), 24);
         piano = new Piano();
         piano->setId("piano_keyboard");
