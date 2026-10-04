@@ -119,3 +119,28 @@ transpose on note-on; held notes retain their original pitch until release.
 Focus loss clears the temporary state. Right modifiers and text editing do not
 trigger these shortcuts. The meter occupies 150 x 80 logical pixels in the
 header; readings below its -60 dBFS range display -inf instead of decay noise.
+
+
+### Recording desk and native waveform selection
+
+The shared workbench now uses a continuous four-tab header: performance,
+resources, mixer and recording. Selection tint is composited into the waveform
+background before peaks, handles and cursor are drawn, so native GDI and GPU
+hosts display the same visible waveform rather than an opaque blue overlay.
+
+AudioRecorder enumerates OS capture/playback endpoints, including installed
+virtual drivers (no driver installation). Owner-thread start/update/stop owns
+device lifetimes; callbacks only use preallocated SPSC PCM rings. Capture,
+pause/resume, optional input monitoring, Windows WASAPI output loopback, take
+playback to a selected endpoint, peaks, dropped-frame diagnostics and PCM16 WAV
+saving are implemented. Loopback cannot monitor back into its source. Default
+48kHz stereo takes are limited to ten minutes; input buffer overflow is reported.
+
+The recording tab defaults to `audio/recordings/Take_<timestamp>.wav` below the
+current project's configured writable asset root. Standalone users select the
+project's asset directory. No project: capture is allowed in memory, save waits
+for a root. Stop then Save WAV; saved takes can open in Resources for range/fade
+editing. Paths escaping the root and existing destinations are rejected.
+Recording output selection applies to this desk's monitoring/playback/loopback;
+the Host AudioEngine's output and mixer buses are independent. Endpoint choices
+are session-local. Closing releases recording devices and discards unsaved PCM.

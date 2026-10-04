@@ -10,6 +10,8 @@
 #endif
 #include <Windows.h>
 #include <commdlg.h>
+#include <shobjidl.h>
+#include <AYProject/Project.h>
 #include <windowsx.h>
 
 #include "AudioEditorSession.h"
@@ -282,6 +284,28 @@ std::intptr_t handleMessage(AppState *state, unsigned msg, std::uintptr_t wParam
     return 0;
 }
 
+std::string chooseRecordingAssets(HWND owner) {
+    const HRESULT initialized=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED|COINIT_DISABLE_OLE1DDE);
+    const bool cleanup=SUCCEEDED(initialized);
+    if(FAILED(initialized) && initialized!=RPC_E_CHANGED_MODE) return {};
+    IFileOpenDialog* dialog=nullptr;std::string selected;
+    if(SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&dialog)))) {
+        DWORD flags=0;dialog->GetOptions(&flags);dialog->SetOptions(flags|FOS_PICKFOLDERS|FOS_FORCEFILESYSTEM|FOS_PATHMUSTEXIST);
+        dialog->SetTitle(L"选择当前项目的资产目录（Assets）");
+        if(SUCCEEDED(dialog->Show(owner))) {
+            IShellItem* item=nullptr;
+            if(SUCCEEDED(dialog->GetResult(&item))) {
+                PWSTR path=nullptr;
+                if(SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH,&path))) {
+                    const auto utf8=std::filesystem::path(path).u8string();selected.assign(utf8.begin(),utf8.end());CoTaskMemFree(path);
+                }
+                item->Release();
+            }
+        }
+        dialog->Release();
+    }
+    if(cleanup) CoUninitialize();return selected;
+}
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
@@ -378,6 +402,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     session.setAudio(&audio);
     session.setAssetRoot(std::filesystem::path(chromePath).parent_path().string());
     session.setPathPicker([hwnd]() { return showOpenAudioDialog(hwnd); });
+    session.setRecordingFolderPicker([hwnd]{return chooseRecordingAssets(hwnd);});
     if (!session.attach(ui))
     {
         std::fprintf(stderr, "[AYAudio_AudioEditor] session.attach failed\n");

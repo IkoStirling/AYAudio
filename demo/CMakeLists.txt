@@ -48,7 +48,7 @@ target_link_libraries(AYAudio_AudioEditor PRIVATE
 )
 
 if(WIN32)
-    target_link_libraries(AYAudio_AudioEditor PRIVATE user32 gdi32 comdlg32)
+    target_link_libraries(AYAudio_AudioEditor PRIVATE user32 gdi32 comdlg32 ole32 shell32 AYProject)
 endif()
 
 if(MSVC)

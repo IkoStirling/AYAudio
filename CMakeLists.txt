@@ -13,6 +13,7 @@ set(SRC_FILES
     src/AYAudioCommandQueue.cpp
     src/AYAudioComponents.cpp
     src/AYAudioEngine.cpp
+    src/AYAudioRecorder.cpp
     src/AYAudioSampleInstrument.cpp
     src/AYAudioEmitterSystem.cpp
     src/AYAudioMixer.cpp
@@ -46,6 +47,7 @@ set(HEAD_FILES
     include/AYAudio/AudioCommandQueue.h
     include/AYAudio/AudioComponents.h
     include/AYAudio/AudioEngine.h
+    include/AYAudio/AudioRecorder.h
     include/AYAudio/SampleInstrument.h
     include/AYAudio/AudioEmitterSystem.h
     include/AYAudio/AudioMixer.h

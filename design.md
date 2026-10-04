@@ -592,3 +592,52 @@ do not all interpret embedded newlines; the initial strip starts at C3.
 The host CMake directories explicitly list AudioWorkbench.inl as an
 OBJECT_DEPENDS of AudioEditorSession.cpp so included UI changes trigger a
 recompile even when compiler include-dependency scanning is unavailable.
+
+
+## 2026-10-04 AudioRecorder and recording workbench
+
+AudioRecorder is an explicit owner-thread controller with its own miniaudio
+context/devices, separate from the Host's shared AudioEngine. Windows uses
+WASAPI, including loopback of a selected playback endpoint. Device IDs are
+enumeration-snapshot choices, not persistent handles. Device open failure retains
+the previous take. Device switches are disabled during recording/playback.
+Input callbacks write F32 PCM into a two-second power-of-two SPSC ring and publish
+peaks/drop counts; optional input monitoring uses a separate consumer ring.
+Owner update drains finite, clamped PCM into a take with pre-reserved bounded
+capacity, reducing UI reallocations. Pause excludes incoming frames from the
+take. Stop joins device callbacks and drains the final chunk. Clear/restart joins
+playback before changing its immutable sample storage. Peak blocks (128 frames)
+are reduced for the shared waveform; live display does not rescan all PCM.
+Monitoring defaults off; loopback+monitor is invalid. The ten-minute take limit
+auto-stops capture while retaining PCM and reports the reason.
+
+Save takes a UTF-8 writable asset root and relative .wav virtual path. It rejects
+active/empty takes, rooted references, parent traversal, canonical/symlink escapes
+and existing targets. PCM16 RIFF is written to a sibling temporary, then published
+without replacement (MoveFile on Windows, exclusive hard link elsewhere).
+Temporary write failures are cleaned up. The shared editor binds the root from
+the current project descriptor and rescans after save; a project change after
+capture prevents saving that take into the new project. The standalone folder
+picker supplies an explicit writable asset directory. Engine/package/cache
+asset roots are not used as recording destinations. The Resource tab can load
+saved WAV through the existing AudioLoader and edit its timeline sidecar.
+
+Waveform selection is an opaque precomposed low-contrast background, drawn first.
+Peaks, clamped visible handles, cursor and time labels follow. This avoids GDI's
+solid-rectangle alpha limitation; recorded takes use the same widget without
+range-edit handles until opened in Resources. The header uses TabStrip's opt-in
+flat paint while retaining tab buttons for input/accessibility and TabControl
+for owned content mounting, overflow, navigation and focus isolation.
+
+Deterministic tests cover concurrent input/drain, pause/final drain, overflow,
+NaN/clipping, duration cap, WAV decode roundtrip, no-overwrite and project path
+confinement. EditorAudioTests covers the recording-tab save-to-resource workflow
+and selection drawing order. Optional AudioRecorderDeviceTests runs only with
+AY_AUDIO_RECORDING_DEVICE_TEST=1; it opens WASAPI loopback, plays a short generated
+take into a selected matching output endpoint, saves WAV and reads it back.
+
+
+录音验证记录（2026-10-04）：确定性录音 4 用例/149 断言、共享编辑器集成
+7 用例/439 断言通过（包括中文录音名称保存后编辑）；真实 WASAPI 回录
+1 用例/14 断言通过，75,360 帧、零丢帧、峰值 0.087921，PCM16 WAV 可加载。
+枚举虚拟设备不代表逐个驱动路由已测试；人工听音未验收。

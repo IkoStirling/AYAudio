@@ -1,7 +1,7 @@
 #pragma once
 
 // Shared core for AYAudio_AudioEditor.exe and AYEditor ChildWindow host.
-// Owns the three-page workbench mounted into audio_editor_root.
+// Owns the four-page workbench mounted into audio_editor_root.
 
 #include "AYUI/UIManager.h"
 
@@ -23,6 +23,7 @@ class TextLabel;
 
 namespace ayt::audio {
 
+class AudioRecorder;
 class AudioEditorSession {
 public:
     using PathPicker = std::function<std::string()>;
@@ -63,6 +64,13 @@ public:
     void releaseKeys();
     void setAssetRoot(std::string root) { _assetRoot=std::move(root); }
     bool isAttached() const { return _ui != nullptr; }
+    AudioRecorder* recorder() const;
+    using RecordingRootProvider = std::function<std::string()>;
+    // Provider returns the writable project Assets root, not packaged/cache assets.
+    void setRecordingRootProvider(RecordingRootProvider provider) { _recordingRoot=std::move(provider); }
+    void setRecordingSavedCallback(std::function<void(const std::string&)> callback) { _recordingSaved=std::move(callback); }
+    void setRecordingFolderPicker(PathPicker picker) { _recordingFolderPicker=std::move(picker); }
+
 
 private:
     struct Workbench;
@@ -116,7 +124,9 @@ private:
 
     ayt::ui::UIManager* _ui = nullptr;
     AudioSubSystem* _audio = nullptr;
-    PathPicker _pathPicker;
+    PathPicker _pathPicker, _recordingFolderPicker;
+    RecordingRootProvider _recordingRoot;
+    std::function<void(const std::string&)> _recordingSaved;
 
     AudioClipId _clipA = InvalidClipId;
     AudioClipId _clipB = InvalidClipId;

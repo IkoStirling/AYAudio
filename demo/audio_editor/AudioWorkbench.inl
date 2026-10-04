@@ -75,6 +75,7 @@ inline void placeholder(VBox *parent, const std::wstring &text)
 class Meter final : public LeafWidget
 {
   public:
+    std::wstring title=L"输出 L / R";
     float left = 0, right = 0, holdL = 0, holdR = 0, clipHold = 0, age = 0;
     uint64_t block = 0;
     void update(const AudioOutputLevels &v, float dt)
@@ -93,7 +94,7 @@ class Meter final : public LeafWidget
     {
         const auto b = getWorldBounds();
         const float top=b.minY+24, bottom=b.maxY-12, height=std::max(1.0f,bottom-top);
-        renderer.drawText({b.minX+6,b.minY,b.maxX,b.minY+20},L"输出 L / R",12,color("$color.text.primary"));
+        renderer.drawText({b.minX+6,b.minY,b.maxX,b.minY+20},title,12,color("$color.text.primary"));
         const auto normalized=[](float p) { return p>0 ? std::clamp((20*std::log10(p)+60)/60,0.0f,1.0f) : 0.0f; };
         for (int channel=0;channel<2;++channel) {
             const float value=channel?right:left, held=channel?holdR:holdL, x=b.minX+8+channel*20;
@@ -278,6 +279,8 @@ class Waveform final : public LeafWidget
     std::vector<float> peaks;
     double duration = 0, begin = 0, end = 0, position = 0, visible = 0, origin = 0;
     int handle = 0;
+    bool editableRange=true, showSelection=true;
+    std::wstring emptyText=L"选择音频资源后显示真实波形";
     std::function<void(double, double, bool)> onRange;
     std::function<void(double)> onSeek;
     double time(float x) const
@@ -296,6 +299,7 @@ class Waveform final : public LeafWidget
     {
         if (e.mouseButton != 0 || duration <= 0)
             return false;
+        if (!editableRange) { if(onSeek) onSeek(time(e.mousePos.x)); return static_cast<bool>(onSeek); }
         handle = std::abs(e.mousePos.x - x(begin)) < 10 ? 1 : std::abs(e.mousePos.x - x(end)) < 10 ? 2 : 0;
         if (handle)
             return true;
@@ -348,26 +352,35 @@ class Waveform final : public LeafWidget
         renderer.drawRect(b, color("$color.bg.surface"));
         if (duration <= 0)
         {
-            renderer.drawText({b.minX + 20, b.minY + 70, b.maxX - 10, b.minY + 100}, L"选择音频资源后显示真实波形", 14,
+            renderer.drawText({b.minX + 20, b.minY + 70, b.maxX - 10, b.minY + 100}, emptyText, 14,
                               color("$color.text.muted"));
             return;
         }
         renderer.pushClip(b);
         const float center = (b.minY + b.maxY) / 2 + 10, height = (b.maxY - b.minY) * .35f;
-        auto accent = color("$color.accent");
-        for (size_t i = 0; i < peaks.size(); ++i)
-        {
-            const float px = x(duration * i / peaks.size());
-            if (px < b.minX || px > b.maxX)
-                continue;
-            renderer.drawRect({px, center - peaks[i] * height, px + 2, center + peaks[i] * height}, accent);
+        const auto accent = color("$color.accent");
+        const auto background = color("$color.bg.surface");
+        // GDI's solid rectangles ignore alpha. Precompose the selection tint
+        // and paint it BELOW the waveform, so both native/GPU hosts agree.
+        const FVector4 range{background.x*.84f+accent.x*.16f,
+                             background.y*.84f+accent.y*.16f,
+                             background.z*.84f+accent.z*.16f,1};
+        const float left=std::max(b.minX,x(begin)),right=std::min(b.maxX,x(end));
+        if(showSelection && right>left) renderer.drawRect({left,b.minY+24,right,b.maxY},range);
+        renderer.drawRect({b.minX,center,b.maxX,center+1},color("$color.text.muted"));
+        const float step=(b.maxX-b.minX)*static_cast<float>(duration/std::max(.001,visible>0?visible:duration))/std::max<size_t>(1,peaks.size());
+        for (size_t i = 0; i < peaks.size(); ++i) {
+            const float px = x(duration * (i+.5) / peaks.size());
+            if (px < b.minX || px > b.maxX) continue;
+            const float amplitude=std::clamp(peaks[i],0.f,1.f)*height;
+            renderer.drawRect({px,center-std::max(.5f,amplitude),std::min(b.maxX,px+std::max(1.f,step-1)),center+std::max(.5f,amplitude)}, accent);
         }
-        auto range = accent;
-        range.w = .14f;
-        renderer.drawRect({x(begin), b.minY + 24, x(end), b.maxY}, range);
-        renderer.drawRect({x(begin), b.minY + 24, x(begin) + 2, b.maxY}, accent);
-        renderer.drawRect({x(end) - 2, b.minY + 24, x(end), b.maxY}, accent);
-        renderer.drawRect({x(position), b.minY + 24, x(position) + 1, b.maxY}, color("$color.text.primary"));
+        if(showSelection && x(begin)>=b.minX && x(begin)<=b.maxX)
+            renderer.drawRect({x(begin),b.minY+24,std::min(b.maxX,x(begin)+2),b.maxY},accent);
+        if(showSelection && x(end)>=b.minX && x(end)<=b.maxX)
+            renderer.drawRect({std::max(b.minX,x(end)-2),b.minY+24,x(end),b.maxY},accent);
+        if(x(position)>=b.minX && x(position)<=b.maxX)
+            renderer.drawRect({x(position),b.minY+24,std::min(b.maxX,x(position)+1),b.maxY},color("$color.text.primary"));
         for (int i = 0; i <= 4; ++i)
         {
             const double t = origin + (visible > 0 ? visible : duration) * i / 4;
@@ -411,6 +424,161 @@ struct AudioEditorSession::Workbench
         float scale;
     };
     std::vector<Gain> gains;
+    AudioRecorder recorder;
+    std::vector<RecordingDevice> recordingDevices;
+    std::vector<std::string> inputIds, outputIds;
+    Combo *recordSource=nullptr,*recordInput=nullptr,*recordOutput=nullptr;
+    TextInput* recordPath=nullptr;
+    workbench::Waveform* recordWave=nullptr;
+    ayt::ui::TextLabel *recordStatus=nullptr,*recordLocation=nullptr;
+    ayt::ui::CheckBox* recordMonitor=nullptr;
+    ayt::ui::Button *recordStart=nullptr,*recordPause=nullptr,*recordStop=nullptr,*recordSave=nullptr,
+                    *recordPlay=nullptr,*recordDiscard=nullptr,*recordEdit=nullptr,*recordRefresh=nullptr,*recordFolder=nullptr;
+    bool devicesLoaded=false, recordSaved=false;
+    std::string chosenRecordRoot,takeRoot,lastSavedRecording;
+    std::wstring recordingMessage=L"就绪 · 输入设备包含已安装的虚拟声卡";
+    uint64_t recordingMeterBlock=0;
+    static std::wstring wide(const std::string& text) {
+        try {return std::filesystem::u8path(text).wstring();}catch(...) {return L"设备或文件操作失败";}
+    }
+    static std::string utf8(const std::wstring& text) {
+        const auto value=std::filesystem::path(text).u8string();return std::string(value.begin(),value.end());
+    }
+    static std::wstring recordingName() {
+        const auto stamp=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        return L"audio/recordings/Take_"+std::to_wstring(stamp)+L".wav";
+    }
+    std::string recordingRoot() const {
+        if(s._recordingRoot) return s._recordingRoot();
+        if(!chosenRecordRoot.empty()) return chosenRecordRoot;
+        const auto& project=ayt::project::Project::instance();
+        return project.hasRoot()?project.resolve("Assets"):std::string{};
+    }
+    void refreshRecordingDevices() {
+        const auto state=recorder.status();if(state.recording || state.playing) return;
+        const auto oldInput=recordInput->getSelectedItem(),oldOutput=recordOutput->getSelectedItem();
+        recorder.stopPlayback();
+        std::string error;
+        devicesLoaded=recorder.enumerateDevices(recordingDevices,&error);
+        inputIds={""};outputIds={""};
+        std::vector<std::wstring> inputs{L"系统默认输入"},outputs{L"系统默认输出"};
+        for(const auto& device:recordingDevices) {
+            auto& ids=device.input?inputIds:outputIds;auto& labels=device.input?inputs:outputs;
+            ids.push_back(device.id);labels.push_back(wide(device.name)+(device.isDefault?L" · 默认":L""));
+        }
+        recordInput->setItems(inputs);recordOutput->setItems(outputs);
+        auto restore=[](Combo* combo,const std::vector<std::wstring>& labels,const std::wstring& old) {
+            const auto found=std::find(labels.begin(),labels.end(),old);
+            combo->setSelectedIndex(found==labels.end()?0:static_cast<int>(found-labels.begin()));
+        };
+        restore(recordInput,inputs,oldInput);restore(recordOutput,outputs,oldOutput);
+        recordingMessage=devicesLoaded?L"设备已刷新 · 48 kHz / 立体声 · 最长 10 分钟":wide(error);
+    }
+    void startRecording() {
+        const auto state=recorder.status();if(state.recording || (state.frames && !recordSaved)) return;
+        if(!devicesLoaded) refreshRecordingDevices();
+        RecordingConfig config;
+        const int input=recordInput->getSelectedIndex(),output=recordOutput->getSelectedIndex();
+        if(input<0 || output<0 || input>=static_cast<int>(inputIds.size()) || output>=static_cast<int>(outputIds.size())) return;
+        config.inputDevice=inputIds[input];config.outputDevice=outputIds[output];
+        config.loopback=recordSource->getSelectedIndex()==1;
+        config.monitor=recordMonitor->isChecked() && !config.loopback;
+        std::string error;
+        if(!recorder.start(config,&error)) {recordingMessage=L"录音启动失败："+wide(error);return;}
+        if(recordSaved) recordPath->setText(recordingName());
+        recordSaved=false;lastSavedRecording.clear();takeRoot=recordingRoot();
+        recordWave->origin=recordWave->visible=0;
+        recordingMessage=config.loopback?L"正在录制所选输出设备的全部声音":L"正在录制所选输入设备";
+    }
+    void saveRecording() {
+        const auto root=recordingRoot();
+        if(!takeRoot.empty() && root!=takeRoot) {recordingMessage=L"项目已切换：请返回录音时的项目后保存";return;}
+        std::string error;
+        try {
+            const auto logical=utf8(recordPath->getText());
+            if(!recorder.saveWav(root,logical,&error)) {recordingMessage=L"保存失败："+wide(error);return;}
+            lastSavedRecording=(std::filesystem::u8path(root)/std::filesystem::u8path(logical)).string();
+            recordSaved=true;recordingMessage=L"已保存："+recordPath->getText();
+            if(s._recordingSaved) s._recordingSaved(logical);
+        }catch(const std::exception& e) {recordingMessage=L"保存失败："+wide(e.what());}
+    }
+    void buildRecordingPage() {
+        using namespace workbench;
+        auto* page=new VBox();page->setPadding(12,14,12,8);page->setSpacing(8);
+        addPage(L"录音台",page);
+        auto* source=row(page,38);source->addWidget(label(L"录音来源"),140);
+        recordSource=new Combo();recordSource->setId("recording_source");
+        recordSource->setItems({L"输入设备 / 虚拟声卡",L"输出回环 · 系统声音"});recordSource->setSelectedIndex(0);source->addWidget(recordSource);
+        recordRefresh=button(source,L"刷新设备","recording_refresh",[this]{refreshRecordingDevices();},100);
+        auto deviceRow=[&](const std::wstring& name,const char* id,Combo*& combo,const std::wstring& initial) {
+            auto* r=row(page,38);r->addWidget(label(name),140);combo=new Combo();combo->setId(id);
+            combo->setItems({initial});combo->setSelectedIndex(0);r->addWidget(combo);
+        };
+        deviceRow(L"音频输入","recording_input",recordInput,L"系统默认输入");
+        deviceRow(L"监听 / 回放输出","recording_output",recordOutput,L"系统默认输出");
+        recordSource->setOnSelectionChanged([this](int index){if(index==1) recordMonitor->setChecked(false);});
+        auto* monitoring=row(page,30);
+        recordMonitor=new ayt::ui::CheckBox();recordMonitor->setId("recording_monitor");recordMonitor->setText(L"实时监听输入（建议使用耳机）");recordMonitor->setChecked(false);
+        monitoring->addWidget(recordMonitor,300);
+        monitoring->addWidget(label(L"输出回环不启用监听 · 输出选择仅用于本录音台"));
+        auto* location=row(page,30);recordLocation=label(L"", "recording_location");location->addWidget(recordLocation);
+        recordFolder=button(location,L"选择资产目录…","recording_folder",[this]{
+            if(s._recordingFolderPicker) {auto root=s._recordingFolderPicker();if(!root.empty()) chosenRecordRoot=std::move(root);}
+        },130);
+        auto* pathRow=row(page,38);pathRow->addWidget(label(L"项目虚拟路径"),140);
+        recordPath=new TextInput();recordPath->setId("recording_path");recordPath->setMaxLength(240);recordPath->setText(recordingName());pathRow->addWidget(recordPath);
+        auto* transport=row(page,38);
+        recordStart=button(transport,L"开始录音","recording_start",[this]{startRecording();},105);
+        recordPause=button(transport,L"暂停","recording_pause",[this]{const bool paused=!recorder.status().paused;recorder.pause(paused);recordingMessage=paused?L"录音已暂停":L"录音继续";},72);
+        recordStop=button(transport,L"停止","recording_stop",[this]{recorder.stop();recorder.stopPlayback();recordingMessage=L"已停止 · 保存后可在音频资源中编辑";},72);
+        recordPlay=button(transport,L"回放录音","recording_play",[this]{
+            const int index=recordOutput->getSelectedIndex();std::string error;
+            if(index>=0 && index<static_cast<int>(outputIds.size()) && recorder.play(outputIds[index],&error)) recordingMessage=L"正在回放录音";
+            else recordingMessage=L"回放失败："+wide(error);
+        },100);
+        recordSave=button(transport,L"保存 WAV","recording_save",[this]{saveRecording();},100);
+        recordDiscard=button(transport,L"丢弃录音","recording_discard",[this]{
+            if(recorder.clear()) {recordSaved=false;lastSavedRecording.clear();recordPath->setText(recordingName());recordingMessage=L"录音已清除 · 已保存文件保留";}
+        },100);
+        recordWave=new Waveform();recordWave->setId("recording_waveform");recordWave->editableRange=false;recordWave->showSelection=false;
+        recordWave->emptyText=L"点击开始录音，显示实时波形；停止后可以缩放查看";page->addWidget(recordWave,220);
+        recordStatus=label(L"就绪","recording_status");page->addWidget(recordStatus,32);
+        auto* actions=row(page,34);
+        recordEdit=button(actions,L"在音频资源中编辑","recording_edit",[this]{
+            if(!lastSavedRecording.empty() && loadResource(lastSavedRecording)) tabs->setSelectedIndex(1);
+        },175);
+        actions->addWidget(label(L"WAV · 48 kHz / 16-bit · 滚轮缩放波形"));
+        page->addWidget(label(L"未保存录音需先保存或丢弃再开始新录音；关闭窗口会停止录音并释放设备。"),28);
+        inputIds={""};outputIds={""};
+    }
+    void tickRecording() {
+        recorder.update();const auto state=recorder.status();const bool busy=state.recording || state.playing;
+        recordSource->setEnabled(!busy);recordInput->setEnabled(!busy && recordSource->getSelectedIndex()==0);
+        recordOutput->setEnabled(!busy);recordRefresh->setEnabled(!busy);
+        recordMonitor->setEnabled(!busy && recordSource->getSelectedIndex()==0);
+        recordFolder->setEnabled(!busy && static_cast<bool>(s._recordingFolderPicker));
+        recordPath->setReadOnly(busy);
+        recordStart->setEnabled(!busy && (!state.frames || recordSaved));
+        recordPause->setEnabled(state.recording);recordPause->setText(state.paused?L"继续":L"暂停");
+        recordStop->setEnabled(busy);recordSave->setEnabled(!busy && state.frames && !recordSaved && !recordingRoot().empty());
+        recordDiscard->setEnabled(!state.recording && state.frames>0);recordPlay->setEnabled(!busy && state.frames>0);
+        recordEdit->setEnabled(!busy && recordSaved);
+        const auto root=recordingRoot();recordLocation->setText(root.empty()?L"尚未选择项目资产目录 · 录音保留在内存":L"保存位置：项目资产目录 / "+recordPath->getText());
+        const double seconds=static_cast<double>(state.frames)/state.sampleRate;
+        if(recordWave->duration!=seconds) {
+            recordWave->duration=seconds;recordWave->begin=0;recordWave->end=seconds;
+            recordWave->peaks=recorder.waveform(1024);
+            if(state.recording) recordWave->origin=recordWave->visible=0;
+            recordWave->markDirty();
+        }
+        recordWave->position=state.playing?state.positionSeconds:seconds;recordWave->markDirty();
+        auto message=state.limitReached?L"已达到 10 分钟上限 · 录音自动停止，请保存":recordingMessage;
+        message+=L" · "+workbench::number(seconds,2)+L" s";
+        if(state.recording) message+=L" · 输入 "+(state.peak>.001f?workbench::number(20*std::log10(state.peak),1)+L" dBFS":L"-inf dBFS");
+        if(state.droppedFrames) message+=L" · 丢帧 "+std::to_wstring(state.droppedFrames)+L"（录音不完整）";
+        recordStatus->setText(message);
+    }
+
     struct Edit
     {
         double begin = 0, end = 0;
@@ -520,6 +688,9 @@ struct AudioEditorSession::Workbench
         tabs = new ayt::ui::TabControl();
         tabs->setId("audio_tabs");
         tabs->setHeaderHeight(38);
+        tabs->getTabStrip()->setFlatHeader(true);
+        tabs->getTabStrip()->setMinTabWidth(112);
+        tabs->getTabStrip()->setIndicatorTweenMs(0);
         content->addWidget(tabs);
 
         auto *performance = new VBox();
@@ -854,9 +1025,11 @@ struct AudioEditorSession::Workbench
             });
         placeholder(mixer, L"独立编辑器试听分组（待实现）");
         placeholder(mixer, L"另存项目混音预设（待实现）");
+        buildRecordingPage();
         diagnostic = label(L"诊断：等待音频引擎", "audio_diagnostic");
         root->addWidget(diagnostic, 28);
-        tabs->setOnSelectionChanged([this](int) {
+        tabs->setOnSelectionChanged([this](int index) {
+            if(index==3 && !devicesLoaded) refreshRecordingDevices();
             s.releaseKeys();
             s._ui->invalidateLayout();
             s._ui->layout();
@@ -864,6 +1037,8 @@ struct AudioEditorSession::Workbench
     }
     ~Workbench()
     {
+        recorder.stop();
+        recorder.stopPlayback();
         releaseAudio();
         if (host && root)
         {
@@ -1140,6 +1315,7 @@ struct AudioEditorSession::Workbench
     }
     void tick(float dt)
     {
+        tickRecording();
         updating = true;
         for (auto &g : gains)
         {
@@ -1150,7 +1326,15 @@ struct AudioEditorSession::Workbench
         }
         updating = false;
         auto *e = s.liveEngine();
-        meter->update(e ? e->outputLevels() : AudioOutputLevels{}, dt);
+        if(tabs->getSelectedIndex()==3) {
+            const auto state=recorder.status();AudioOutputLevels levels{};
+            levels.left=levels.right=state.peak;levels.block=++recordingMeterBlock;levels.clipped=state.peak>=1;
+            meter->title=state.recording?L"录音输入 L / R":L"录音回放 L / R";
+            meter->update(levels,dt);
+        } else {
+            meter->title=L"输出 L / R";
+            meter->update(e ? e->outputLevels() : AudioOutputLevels{}, dt);
+        }
         if (resourceValid() && resourceVoice)
         {
             VoiceRuntime state;

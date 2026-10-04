@@ -12,6 +12,7 @@ add_executable(${TEST_TARGET}
     Test_AudioSpatializer.cpp
     Test_AudioMixer.cpp
     Test_AudioEngine.cpp
+    Test_AudioRecorder.cpp
     Test_SampleInstrument.cpp
     Test_MiniaudioBackend.cpp
     Test_AudioSubSystemBridge.cpp

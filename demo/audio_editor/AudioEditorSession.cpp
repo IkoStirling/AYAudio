@@ -6,6 +6,10 @@
 #include <AYUI/Style.h>
 
 #include <AYAudio/AudioTypes.h>
+#include <AYAudio/AudioRecorder.h>
+#include <AYProject/Project.h>
+#include <AYIO/Path.h>
+#include <chrono>
 
 #include <cmath>
 #include <algorithm>
@@ -665,6 +669,8 @@ void AudioEditorSession::onFocusLost() {
     releaseKeys();
     if (_ui) {_ui->cancelCapture();_ui->onKeyUp(16);_ui->onKeyUp(17);_ui->onKeyUp(18);}
 }
+AudioRecorder* AudioEditorSession::recorder() const {return _workbench?&_workbench->recorder:nullptr;}
+
 bool AudioEditorSession::openResource(const std::string& path) {return _workbench&&_workbench->loadResource(path);}
 ayt::math::FRectangle AudioEditorSession::pianoKeyBounds(int note) const {return _workbench?_workbench->piano->keyBounds(note):ayt::math::FRectangle{};}
 
