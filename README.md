@@ -106,3 +106,8 @@ Full-file sample loading uses AYResource AudioLoader. PCM frame count is derived
 from validated byte length at the AYAudio bridge, avoiding stereo truncation
 when decoder metadata counts per-channel frames. Audio documents use that same
 PCM layout to derive source duration.
+
+Native workbench attachment recalculates layout immediately, even when the host
+already cached an empty mount panel. Tab changes also recalculate immediately;
+no window resize or per-frame layout call is required. The EditorAudioTests
+suite covers native/standalone load order, reattachment and tab switching.

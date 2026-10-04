@@ -58,9 +58,13 @@ AudioEditorSession::~AudioEditorSession() {
 bool AudioEditorSession::attach(ayt::ui::UIManager& ui) {
     detach();
     _ui = &ui;
+    const ayt::ui::UIManager::ActiveScope active(_ui);
     auto* mount = _ui->findById("audio_editor_root");
     if (!mount) return false;
     _workbench = std::make_unique<Workbench>(*this, mount);
+    // Native children have already cached layout before this subtree exists.
+    _ui->invalidateLayout();
+    _ui->layout();
     if (_audio == nullptr || _audio->engine() == nullptr
         || !_audio->engine()->isInitialized()) {
         setStatus(L"No AudioSubSystem / engine — register audio or drop -no-audio");

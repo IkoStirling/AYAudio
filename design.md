@@ -559,3 +559,13 @@ starts. Atomic sidecar writes preserve original audio. Fade durations are bounde
 to source selection length when dragging. Undo/redo stores validated edits;
 changing resource routes stops only that resource voice. Preset library, export,
 envelope authoring and a dedicated Preview bus are visibly disabled.
+
+### Native workbench layout cache repair (2026-10-04)
+
+The native child loads and lays out the mount panel before attaching the session.
+Programmatic widget insertion does not invalidate UIManager layout caches, and
+the GDI child tick loop updates/renders without a layout pass. Attachment must
+activate its own UIManager, invalidate the cache and perform layout immediately.
+Tab selection must also invalidate and perform layout immediately. Tests must
+use the production load order without a post-attachment resize/layout call,
+including a different primary UIManager being active and repeated attachment.

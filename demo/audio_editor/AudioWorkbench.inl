@@ -856,6 +856,7 @@ struct AudioEditorSession::Workbench
         tabs->setOnSelectionChanged([this](int) {
             s.releaseKeys();
             s._ui->invalidateLayout();
+            s._ui->layout();
         });
     }
     ~Workbench()
