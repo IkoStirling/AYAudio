@@ -360,8 +360,8 @@ TEST_SUITE(AudioEngineTests)
         CHECK(engine.activeVoiceCount() == 2);
 
         // Distinct voiceIds stored on the two slots.
-        const VoiceRuntime* ra = engine.voiceAt(a - 1);
-        const VoiceRuntime* rb = engine.voiceAt(b - 1);
+        const VoiceRuntime* ra = engine.voiceForHandle(a);
+        const VoiceRuntime* rb = engine.voiceForHandle(b);
         CHECK(ra != nullptr);
         CHECK(rb != nullptr);
         CHECK(ra->voiceId != 0);
@@ -375,14 +375,14 @@ TEST_SUITE(AudioEngineTests)
         float output[kFrames * 2]{};
         engine.render(output, kFrames);
         CHECK(engine.activeVoiceCount() == 1);
-        CHECK(!engine.voiceAt(a - 1)->playing);
-        CHECK(engine.voiceAt(b - 1)->playing);
+        CHECK(!engine.voiceForHandle(a)->playing);
+        CHECK(engine.voiceForHandle(b)->playing);
 
         // Render again — b's read head must continue advancing, not be reset
         // by the snapshot re-binding loop.
-        const uint64_t posBefore = engine.voiceAt(b - 1)->positionFrames;
+        const uint64_t posBefore = engine.voiceForHandle(b)->positionFrames;
         engine.render(output, kFrames);
-        CHECK(engine.voiceAt(b - 1)->positionFrames > posBefore);
+        CHECK(engine.voiceForHandle(b)->positionFrames > posBefore);
 
         engine.shutdown();
     }
@@ -442,7 +442,7 @@ TEST_SUITE(AudioEngineTests)
         constexpr uint32_t kFrames = 64;
         float output[kFrames * 2]{};
         engine.render(output, kFrames);
-        const uint64_t posAtPitch1 = engine.voiceAt(v - 1)->positionFrames;
+        const uint64_t posAtPitch1 = engine.voiceForHandle(v)->positionFrames;
         CHECK(posAtPitch1 > 0u);
 
         // Now stop, restart with pitch 2.0, render again, and confirm the
@@ -456,7 +456,7 @@ TEST_SUITE(AudioEngineTests)
         engine.setVoicePitch(v2, 2.0f);
         engine.submitFrame(0.0f);
         engine.render(output, kFrames);
-        const uint64_t posAtPitch2 = engine.voiceAt(v2 - 1)->positionFrames;
+        const uint64_t posAtPitch2 = engine.voiceForHandle(v2)->positionFrames;
         // Pitch 2 should advance at least ~1.5× pitch 1 over a 64-frame
         // block (allow wide slack for the fractional accumulator settling
         // across the very first call).

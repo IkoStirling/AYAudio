@@ -16,7 +16,8 @@ namespace ayt::audio
 // 0 is reserved as the invalid handle, matching the engine convention.
 
 using AudioClipId = uint32_t;
-using VoiceHandle = uint32_t;
+// Opaque identity, never a voice-pool index. Invalidated by stop/reuse/re-init.
+using VoiceHandle = uint64_t;
 using AudioStreamId = uint32_t;
 
 constexpr AudioClipId InvalidClipId = 0;
@@ -50,7 +51,7 @@ struct AudioClipDesc {
                                     // engine dispatch actually reads.
     AudioSampleFormat format = AudioSampleFormat::F32;
     uint32_t frameCount = 0;        // samples per channel
-    const void* pcmData = nullptr;  // owned by caller until releaseClip()
+    const void* pcmData = nullptr;  // copied into engine-owned storage at registration
 };
 
 // ===== 3D spatialization parameters =====
@@ -205,6 +206,17 @@ struct VoiceRuntime {
     // AudioEngine::_applyCommand). 0 = unallocated. Survives across
     // stop()/play() cycles because the counter is engine-wide.
     uint64_t voiceId = 0;
+    double sourceFraction = 0.0;
+    uint64_t rangeBegin = 0;
+    uint64_t rangeEnd = 0; // exclusive; 0 means clip end
+    uint64_t ageFrames = 0;
+    uint64_t attackFrames = 0;
+    uint64_t fadeOutFrames = 0;
+    uint64_t releaseFrames = 0;
+    uint64_t releaseRemaining = 0;
+    float releaseStartGain = 1.0f;
+    float envelopeGain = 1.0f;
+    bool paused = false;
 
     // v1.5: dispatch source. When sourceKind == Stream, `stream` is the
     // AudioStreamId of the ring buffer feeding the voice. `clip` is unused.

@@ -489,7 +489,7 @@ void onCommand(GalleryState& s, int id)
 
         if (s.stream.voice != ayt::audio::InvalidVoice)
         {
-            galleryLog("stream: stopping previous voice=%u", s.stream.voice);
+            galleryLog("stream: stopping previous voice=%llu", static_cast<unsigned long long>(s.stream.voice));
             s.audio.stopStreaming(s.stream);
             s.stream = {};
         }
@@ -519,9 +519,9 @@ void onCommand(GalleryState& s, int id)
                                      0.55f, false);
                 }
             }
-            galleryLog("stream: OK voice=%u stream=%u. Listen for short beep "
+            galleryLog("stream: OK voice=%llu stream=%u. Listen for short beep "
                        "then BGM. Console: contentPeak / stream.pump peak=",
-                       s.stream.voice, s.stream.stream);
+                       static_cast<unsigned long long>(s.stream.voice), s.stream.stream);
             setStatus(s, L"Streaming (+cue beep): " + pathW);
         }
         refreshStatus(s);

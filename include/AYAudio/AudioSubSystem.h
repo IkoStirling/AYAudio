@@ -66,7 +66,7 @@ public:
     void setBackend(std::unique_ptr<IAudioBackend> backend);
 
     // Register a clip from an AYResource audio asset. Maps IAudio fields
-    // (sample rate / channels / bits / sample count / data) to AudioClipDesc
+    // (sample rate / channels / bits / PCM byte length / data) to AudioClipDesc
     // and registers it with the engine. Only 16-bit and 32-bit PCM are
     // accepted (matching AudioSampleFormat::S16 / F32); other bit depths
     // return InvalidClipId.

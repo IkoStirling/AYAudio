@@ -120,19 +120,20 @@ AudioClipId AudioSubSystem::registerClipFromResource(const ayt::resource::IAudio
     if (channels != 1 && channels != 2) {
         return InvalidClipId;
     }
-    const uint64_t sampleCount = audio->getSampleCount();
-    if (sampleCount == 0 || sampleCount > UINT32_MAX) {
-        return InvalidClipId;
-    }
+    // Decoder/cooked metadata may count frames or interleaved samples.
+    // The PCM byte length is authoritative and also bounds every read.
+    const uint32_t bytesPerFrame = channels * (audio->getBitsPerSample() / 8u);
+    const uint64_t dataSize = audio->getDataSize();
+    if (!audio->getData() || !dataSize || dataSize % bytesPerFrame != 0u) return InvalidClipId;
+    const uint64_t frameCount = dataSize / bytesPerFrame;
+    if (frameCount > UINT32_MAX) return InvalidClipId;
 
     AudioClipDesc desc{};
     desc.sampleRate    = audio->getSampleRate();
     desc.channels      = static_cast<uint16_t>(channels);
     desc.bitsPerSample = static_cast<uint16_t>(audio->getBitsPerSample());
     desc.format        = fmt;
-    // IAudio::getSampleCount returns total interleaved samples
-    // (frames * channels). AudioClipDesc.frameCount is per-channel frames.
-    desc.frameCount    = static_cast<uint32_t>(sampleCount / channels);
+    desc.frameCount    = static_cast<uint32_t>(frameCount);
     desc.pcmData       = audio->getData();
     return _engine->registerClip(desc);
 }
@@ -263,10 +264,10 @@ StreamingPlayback AudioSubSystem::playStreamingFile(const std::string& path,
 
     std::fprintf(stderr,
                  "[AYAudio] playStreamingFile: OK path=\"%s\" ch=%u srcRate=%u "
-                 "engineRate=%u voice=%u stream=%u vol=%.2f (req=%.2f) "
+                 "engineRate=%u voice=%llu stream=%u vol=%.2f (req=%.2f) "
                  "contentPeak=%.4f bus=%u\n",
                  path.c_str(), static_cast<unsigned>(channels), sourceRate,
-                 desc.sampleRate, voice, streamId, playVol, volume, contentPeak,
+                 desc.sampleRate, static_cast<unsigned long long>(voice), streamId, playVol, volume, contentPeak,
                  static_cast<unsigned>(bus));
     std::fflush(stderr);
 

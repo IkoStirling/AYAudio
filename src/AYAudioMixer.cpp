@@ -272,7 +272,7 @@ void AudioMixer::mix(float* output,
                 ? 0.0f
                 : std::pow(10.0f, _duck.currentDb / 20.0f);
 
-        float scratch[4096];
+        float scratch[8192];
 
         for (uint32_t i = 0; i < voiceCount; ++i) {
             const VoiceSourceFn source = voiceSources[i];

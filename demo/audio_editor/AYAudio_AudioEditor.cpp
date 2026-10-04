@@ -28,6 +28,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <filesystem>
 #include <sys/stat.h>
 #include <vector>
 
@@ -36,7 +37,7 @@
 namespace {
 
 constexpr int kWidth = 960;
-constexpr int kHeight = 640;
+constexpr int kHeight = 900;
 
 bool fileExists(const std::string& path) {
     struct stat st {};
@@ -44,7 +45,9 @@ bool fileExists(const std::string& path) {
 }
 
 std::string resolveChromePath() {
+    wchar_t executable[32768]{}; ::GetModuleFileNameW(nullptr,executable,32768);
     const std::vector<std::string> candidates = {
+        (std::filesystem::path(executable).parent_path()/"assets"/"audio_editor.ui.json").string(),
         "assets/audio_editor.ui.json",
         "AYRuntime/AYAudio/demo/audio_editor/assets/audio_editor.ui.json",
         "../AYRuntime/AYAudio/demo/audio_editor/assets/audio_editor.ui.json",
@@ -146,12 +149,18 @@ std::intptr_t handleMessage(AppState* state, unsigned msg, std::uintptr_t wParam
         return 0;
     }
     case WM_LBUTTONDOWN: {
+        if (state->session && state->session->handleMouseButton(static_cast<float>(GET_X_LPARAM(lParam)),static_cast<float>(GET_Y_LPARAM(lParam)),0,true)) {
+            ::SetCapture(static_cast<HWND>(state->devices->window().getWindowHandle())); handled=true; return 0;
+        }
         ui.onMouseButtonDown(static_cast<float>(GET_X_LPARAM(lParam)),
                              static_cast<float>(GET_Y_LPARAM(lParam)), 0);
         handled = true;
         return 0;
     }
     case WM_LBUTTONUP: {
+        if (state->session && state->session->handleMouseButton(static_cast<float>(GET_X_LPARAM(lParam)),static_cast<float>(GET_Y_LPARAM(lParam)),0,false)) {
+            ::ReleaseCapture(); handled=true; return 0;
+        }
         ui.onMouseButtonUp(static_cast<float>(GET_X_LPARAM(lParam)),
                            static_cast<float>(GET_Y_LPARAM(lParam)), 0);
         handled = true;
@@ -188,15 +197,19 @@ std::intptr_t handleMessage(AppState* state, unsigned msg, std::uintptr_t wParam
         handled = true;
         return 0;
     }
+    case WM_KILLFOCUS:
+    case WM_CANCELMODE:
+        if (state->session) state->session->releaseKeys();
+        return 0;
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN: {
-        ui.onKeyDown(static_cast<int>(wParam));
+        if (!state->session || !state->session->handleKey(static_cast<int>(wParam),true)) ui.onKeyDown(static_cast<int>(wParam));
         handled = true;
         return 0;
     }
     case WM_KEYUP:
     case WM_SYSKEYUP: {
-        ui.onKeyUp(static_cast<int>(wParam));
+        if (!state->session || !state->session->handleKey(static_cast<int>(wParam),false)) ui.onKeyUp(static_cast<int>(wParam));
         handled = true;
         return 0;
     }
@@ -295,6 +308,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     ayt::audio::AudioEditorSession session;
     state.session = &session;
     session.setAudio(&audio);
+    session.setAssetRoot(std::filesystem::path(chromePath).parent_path().string());
     session.setPathPicker([hwnd]() { return showOpenAudioDialog(hwnd); });
     if (!session.attach(ui)) {
         std::fprintf(stderr, "[AYAudio_AudioEditor] session.attach failed\n");

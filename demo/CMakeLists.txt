@@ -70,3 +70,11 @@ add_custom_command(TARGET AYAudio_AudioEditor POST_BUILD
         $<TARGET_FILE_DIR:AYAudio_AudioEditor>/assets
     COMMENT "Copy Audio Editor assets next to AYAudio_AudioEditor"
 )
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../EngineAssets/AYAudio/samples")
+    add_custom_command(TARGET AYAudio_AudioEditor POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../../EngineAssets/AYAudio/samples"
+            "$<TARGET_FILE_DIR:AYAudio_AudioEditor>/assets/samples"
+        COMMENT "Stage piano samples and attribution")
+endif()

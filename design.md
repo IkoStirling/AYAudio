@@ -117,8 +117,8 @@ Former strategy table (kept for history):
 
 ### 2.4 Threading model ✅ (locked)
 
-- **Game thread:** `AudioSubSystem::update()` — listener pose, emitters, enqueue `AudioCommand`s.
-- **Audio thread:** miniaudio data callback — drain commands, mix voices, write interleaved **float32** to device.
+- **Game thread:** `AudioSubSystem::update()` — listener pose, emitters; public controls update guarded engine state synchronously and enqueue diagnostic breadcrumbs.
+- **Audio thread:** miniaudio data callback — try the shared state gate, drain breadcrumbs, mix voices, write interleaved **float32** to device. Contention yields silence; preload before performance.
 
 No OpenAL-style context on game thread.
 
@@ -181,7 +181,7 @@ struct AudioClipDesc {
 ┌─────────────────────────────────────────────────────────────┐
 │  Gameplay / Editor / Script / ECS (optional)                 │
 └───────────────────────────┬─────────────────────────────────┘
-                            │ AudioCommand queue (SPSC)
+                            │ Guarded synchronous controls
 ┌───────────────────────────▼─────────────────────────────────┐
 │  AudioEngine                                                 │
 │  ├─ ClipRegistry (id → PCM or stream state)                  │
@@ -494,3 +494,38 @@ AYRuntime/AYAudio/
 | 2026-08-13 | **Implement §2.3.1 A1–A6**: AYResource `AudioDecoder` (WAV/minimp3/stb_vorbis), loose loaders, cook path, `AY_AUDIO_LOOSE_FORMATS`, ImportJob wiring |
 | 2026-08-13 | **Lock §2.3**: Dev common formats (WAV/MP3/OGG) in AYResource; cook PCM `.ayaudio` for ship/optimize only; reject codec-in-AYAudio; add §2.3.1 slices A0–A6; update §3.1/§3.2 |
 | 2026-07-11 | Initial design: miniaudio, SDL2 decoupling, spatial params, format TBD |
+
+## 2026-10-04: sampler, voice identity and bounded previews
+
+Voice handles now carry monotonic identities rather than reusable pool indices.
+All setters resolve identity; late stale handles cannot mutate a replacement.
+Engine callbacks and main-thread state mutation share a recursive state gate;
+the callback never waits (silence on contention). Device stop joins callbacks
+before registry teardown. Already-applied command breadcrumbs are tagged and
+ignored on drain; they cannot resurrect an old voice or free a new clip that
+reused its slot. Raw diagnostic queue playback commands are not gameplay APIs.
+Do not mutate `clipRegistry` or `mixer` directly during live rendering; diagnostics
+that expose raw pointers are only stable between engine mutations. Prefer copies.
+
+PCM rendering carries fractional interpolation position across blocks, bounds
+playback to [rangeBegin,rangeEnd), and scales fade-out by remaining source frames.
+Per-output-frame attack/release state is applied before mixing and committed
+with the same voice identity. Pause preserves source/envelope age. Mono compacts
+the stereo source scratch; mix scratch holds 4096 stereo frames. Larger engine
+render requests are split into blocks. Instruments preload and borrow regions;
+the sampler owns notes, sustain and stealing policy, not codecs or UI input.
+
+AudioEditorSession owns all preview clips/voices. Detach releases only those
+resources, detects host engine replacement, and unbinds chrome callbacks before
+UI destruction. Opening a window does not reset listener/gains/effects. Keyboard
+and pointer state share note gates so one source's release cannot stop the other.
+Both hosts route key-up and focus loss; numeric/text editing suppresses note-on.
+
+Full-file sample loading uses AYResource AudioLoader. PCM frame count is derived
+from validated byte length at the AYAudio bridge, avoiding stereo truncation
+when decoder metadata counts per-channel frames. Audio documents use that same
+PCM layout to derive source duration.
+
+The default instrument loads cooked C1..C7 .aud assets first, so Release does not
+depend on the development loose MP3 loader. Original samples and attribution
+remain in AssetRepo; import_tool produces the cooked PCM copied by the manifest.

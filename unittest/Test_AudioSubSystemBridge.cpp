@@ -9,6 +9,7 @@
 #include <AYAudio/AudioSubSystem.h>
 
 #include <AYResource/assetsDefs/IAudio.h>   // ayt::resource::IAudio
+#include <AYResource/assetsImpl/Audio.h>
 #include <AYMath/MathDefs.h> // brings UInt8/UInt32/UInt64/Float32 into global ns
 
 #include "AYTest.h"
@@ -177,6 +178,16 @@ TEST_SUITE(AudioSubSystemBridgeTests)
         AudioSubSystem sub;
         StubAudio audio(48000, 1, 16, std::vector<uint8_t>(2, 0));
         CHECK(sub.registerClipFromResource(&audio) == ayt::audio::InvalidClipId);
+    }
+
+    TEST_CASE(StereoDecoderFrameMetadataKeepsCompletePcm) {
+        AudioSubSystem sub; CHECK(sub.initialize());
+        ayt::resource::Audio decoded;
+        decoded.setFormat(48000, 2, 16, 4); // Full-file decoder reports per-channel frames.
+        decoded.setData(std::vector<uint8_t>(16, 0));
+        const auto id=sub.registerClipFromResource(&decoded); CHECK(id!=InvalidClipId);
+        const auto* slot=sub.engine()->clipRegistry().find(id); CHECK(slot!=nullptr);
+        CHECK(slot->desc.frameCount==4); sub.shutdown();
     }
 
 TEST_SUITE_END

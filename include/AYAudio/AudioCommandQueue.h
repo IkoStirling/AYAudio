@@ -53,6 +53,7 @@ enum class AudioCommandType : uint8_t {
 
 struct AudioCommand {
     AudioCommandType type = AudioCommandType::Play;
+    bool appliedSynchronously = false; // serialized engine state already applied
 
     // Scalar payload (meaning depends on `type`).
     AudioClipId clip = InvalidClipId;

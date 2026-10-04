@@ -32,6 +32,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 namespace ayt::audio
@@ -67,6 +68,21 @@ public:
                      float volume = 1.0f,
                      bool loop = false);
 
+    /// Releases a voice with an audio-frame fade, independent of UI frame rate.
+    void releaseVoice(VoiceHandle voice, float seconds = 0.12f);
+    void setVoicePaused(VoiceHandle voice, bool paused);
+    /// Clip source interval [begin,end), exclusive end, clamped to registered PCM.
+    bool setVoicePlaybackRange(VoiceHandle voice, uint64_t begin, uint64_t end);
+    void setVoiceEnvelope(VoiceHandle voice, float attackSeconds, float fadeOutSeconds);
+    /// Copies a coherent snapshot. Never interpret VoiceHandle as a pool index.
+    bool voiceState(VoiceHandle voice, VoiceRuntime& out) const;
+    bool voiceStateAt(uint32_t index, VoiceRuntime& out) const;
+    uint64_t lifecycleGeneration() const { return _lifecycleGeneration; }
+    float masterGain() const;
+    float busGain(AudioBus bus) const;
+    float reverbReturn() const;
+    uint8_t reverbPreset() const;
+    DuckingState duckingState() const;
     void stop(VoiceHandle voice);
     void stopAll();
 
@@ -167,7 +183,7 @@ public:
 
     // ===== Per-frame tick (game thread) =====
 
-    // Drains pending commands and applies state on the audio side. Cheap;
+    // Drains diagnostic command breadcrumbs when using a synchronous backend;
     // call once per game frame before the backend renders. deltaTime is
     // reserved for future use (smooth doppler ramps).
     void submitFrame(float deltaTime);
@@ -175,9 +191,9 @@ public:
     // ===== Backend integration =====
 
     // Pull the next audio buffer (interleaved float32). Called by the
-    // backend's data callback (audio thread). Safe to call from any thread
-    // because it operates on the audio-thread-owned state copy after the
-    // command queue has been drained.
+    // backend's data callback (audio thread). State mutations are serialized.
+    // The callback uses try_lock and outputs silence on contention; preload
+    // assets before interactive playback. This is not a hard realtime engine.
     void render(float* output, uint32_t frameCount);
 
     // Backend introspection (used by AudioSubSystem).
@@ -200,6 +216,8 @@ public:
     // Voice iteration helpers (for tests and editor).
     uint32_t activeVoiceCount() const;
     const VoiceRuntime* voiceAt(uint32_t index) const;
+    // Diagnostic pointer, valid only between engine mutations; prefer voiceState.
+    const VoiceRuntime* voiceForHandle(VoiceHandle voice) const;
 
 private:
     // ===== Internal helpers =====
@@ -218,11 +236,13 @@ private:
     // Look up a voice slot by its monotonic voiceId. Returns
     // (slotIndex, true) on hit, (0, false) on miss. O(N) linear scan; the
     // voice pool caps at settings.maxVoices (≤ 64 in v0) so the cost is
-    // bounded. The audio thread runs this once per queued Play command.
+    // bounded. Both synchronous controls and render use the same guarded pool.
     bool _findVoiceById(uint64_t voiceId, uint32_t& outSlot) const;
 
     // ===== State =====
 
+    mutable std::recursive_mutex _stateMutex;
+    uint64_t _lifecycleGeneration = 0;
     AudioSettings _settings{};
     AudioBackendInfo _backendInfo{};
     ListenerParams _listener{};
@@ -233,19 +253,17 @@ private:
 
     std::unique_ptr<IAudioBackend> _backend;
 
-    // Voice pool. Index 0 is unused so VoiceHandle == index + 1.
+    // Dense voice pool. Opaque monotonic handles are resolved by identity, never by index.
     std::vector<VoiceRuntime> _voices;
     uint32_t _voiceCapacity = 0;
-    // Monotonic voice identity assigned at play() / playStream() time. The
-    // audio thread matches incoming Play commands against this id (see
-    // _findVoiceById) so that game-thread and audio-thread writes converge
-    // on the same slot instead of dual-allocating. 0 is reserved as
-    // "unallocated". uint64_t is generous but cheap.
+    // Monotonic voice identity assigned at play() / playStream() time.
+    // It survives initialize/shutdown cycles so stale handles cannot control
+    // a newly allocated voice. Zero is reserved as invalid.
     uint64_t _nextVoiceId = 1;
     uint64_t _engineFrame = 0;          // ticks on every submitFrame
 
-    bool _initialized = false;
-    bool _paused = false;
+    std::atomic<bool> _initialized{false};
+    std::atomic<bool> _paused{false};
 
     // v1.5: fixed 8-slot streaming pool. Each slot owns a ring buffer; the
     // game-thread producer writes via streamPush(); the audio-thread consumer
@@ -260,17 +278,15 @@ private:
 
     // Engine-wide pitch multiplier. Clamped to [0.25, 4.0] in setTimeScale.
     // Consumed (read) on the audio thread inside the per-voice source
-    // callbacks — game-thread writes are atomic because float writes are
-    // naturally aligned and the audio thread reads once per voice per
-    // render block; a torn read only affects a single block boundary.
-    float _timeScale = 1.0f;
+    // callbacks, using an atomic snapshot once per render block.
+    std::atomic<float> _timeScale{1.0f};
 
     // Audio-thread underrun tally (see streamUnderrunCount).
     std::atomic<uint64_t> _streamUnderrunCount{0};
 
     // v2.0b: doppler scale multiplier. Same single-audio-thread / once-per-
     // block snapshot pattern as _timeScale. Clamped to [0, 2].
-    float _dopplerScale = 1.0f;
+    std::atomic<float> _dopplerScale{1.0f};
 };
 
 } // namespace ayt::audio

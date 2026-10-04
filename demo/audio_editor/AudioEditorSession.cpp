@@ -3,10 +3,15 @@
 #include "AYUI/Button.h"
 #include "AYUI/Slider.h"
 #include "AYUI/TextLabel.h"
+#include <AYUI/Style.h>
 
 #include <AYAudio/AudioTypes.h>
 
 #include <cmath>
+#include <algorithm>
+#include <filesystem>
+#include <AYResource/assetsImpl/Audio.h>
+#include <AYResource/Loader/AudioLoader.h>
 #include <cstdio>
 #include <cstring>
 
@@ -42,20 +47,6 @@ bool AudioEditorSession::attach(ayt::ui::UIManager& ui) {
         return true;
     }
 
-    AudioEngine* eng = _audio->engine();
-    eng->setMasterGain(1.0f);
-    eng->setBusGain(AudioBus::Music, 1.0f);
-    eng->setBusGain(AudioBus::Sfx, 1.0f);
-    eng->setMasterReverbReturn(0.15f);
-    eng->setReverbPreset(0);
-    eng->setDopplerScale(1.0f);
-
-    ListenerParams listener{};
-    listener.position = {0, 0, 0};
-    listener.forward = {0, 0, -1};
-    listener.up = {0, 1, 0};
-    eng->setListener(listener);
-
     if (!ensureClips()) {
         setStatus(L"Clip register failed");
         bindChrome();
@@ -63,24 +54,13 @@ bool AudioEditorSession::attach(ayt::ui::UIManager& ui) {
     }
 
     bindChrome();
-    setStatus(L"Ready — Play 440 (device check) → Open Stream…");
+    refreshStatus();
     return true;
 }
 
 void AudioEditorSession::detach() {
-    if (_audio != nullptr && _stream.voice != InvalidVoice) {
-        _audio->stopStreaming(_stream);
-        _stream = {};
-    }
-    if (_audio != nullptr && _audio->engine() != nullptr
-        && _loopVoice != InvalidVoice) {
-        _audio->engine()->stop(_loopVoice);
-        _loopVoice = InvalidVoice;
-    }
-    unbindChrome();
-    _ui = nullptr;
-    _status = nullptr;
-    _streamTrackLabel = nullptr;
+    releaseResources();
+    unbindChrome(); _ui=nullptr; _status=nullptr; _streamTrackLabel=nullptr;
 }
 
 void AudioEditorSession::tick(float dt) {
@@ -93,6 +73,7 @@ void AudioEditorSession::tick(float dt) {
         ++_tickCount;
         return;
     }
+    if (liveEngine() && !ensureClips()) { setStatus(L"Audio resources could not be registered"); return; }
     if (_driveAudioUpdate && _audio != nullptr) {
         _audio->update(dt);
     }
@@ -103,20 +84,35 @@ void AudioEditorSession::tick(float dt) {
     }
 }
 
+AudioEngine* AudioEditorSession::liveEngine() const {
+    auto* engine=_audio ? _audio->engine() : nullptr;
+    return engine && engine->isInitialized() ? engine : nullptr;
+}
+void AudioEditorSession::releaseResources() {
+    auto* engine=liveEngine();
+    const bool same=engine && engine==_boundEngine && engine->lifecycleGeneration()==_engineGeneration;
+    if (!same && _instrument) _instrument->abandon();
+    if (same) {
+        stopOwned();
+        for (auto id : {_clipA,_clipB,_clipLoop}) if (id) engine->releaseClip(id);
+        for (auto id : _instrumentClips) engine->releaseClip(id);
+    }
+    _instrument.reset(); _instrumentClips.clear(); _ownedVoices.clear();
+    _keyboard.fill(false); _mouse.fill(false); _mouseKey=-1;
+    _stream={}; _streamPath.clear(); _loopVoice=InvalidVoice;
+    _clipA=_clipB=_clipLoop=InvalidClipId; _clipsReady=false; _boundEngine=nullptr;
+    _paused=false; _spaceDown=false; _pedalLatch=false;
+}
 bool AudioEditorSession::ensureClips() {
-    if (_clipsReady && _clipsAudio == _audio) {
-        return true;
-    }
-    if (_audio == nullptr || _audio->engine() == nullptr) {
-        return false;
-    }
-    _clipA = registerOwnedClip(_pcmA, 440.0f, 0.35f, 0.35f);
-    _clipB = registerOwnedClip(_pcmB, 880.0f, 0.25f, 0.30f);
-    _clipLoop = registerOwnedClip(_pcmLoop, 220.0f, 1.0f, 0.20f);
-    _clipsReady = (_clipA != InvalidClipId && _clipB != InvalidClipId
-                   && _clipLoop != InvalidClipId);
-    _clipsAudio = _clipsReady ? _audio : nullptr;
-    return _clipsReady;
+    auto* engine=liveEngine(); if (!engine) return false;
+    if (_clipsReady && engine==_boundEngine && engine->lifecycleGeneration()==_engineGeneration) return true;
+    releaseResources(); _boundEngine=engine; _engineGeneration=engine->lifecycleGeneration();
+    _clipA=registerOwnedClip(_pcmA,440.0f,0.35f,0.35f);
+    _clipB=registerOwnedClip(_pcmB,880.0f,0.25f,0.30f);
+    _clipLoop=registerOwnedClip(_pcmLoop,220.0f,1.0f,0.20f);
+    _clipsReady=_clipA && _clipB && _clipLoop;
+    if (!_clipsReady) { releaseResources(); return false; }
+    buildInstrument(_sine); return _instrument && !_instrumentClips.empty();
 }
 
 std::vector<float> AudioEditorSession::makeSine(uint32_t sampleRate,
@@ -143,7 +139,7 @@ std::vector<float> AudioEditorSession::makeSine(uint32_t sampleRate,
 AudioClipId AudioEditorSession::registerOwnedClip(std::vector<float>& storage,
                                                   float freqHz, float seconds,
                                                   float amp) {
-    AudioEngine* eng = _audio ? _audio->engine() : nullptr;
+    AudioEngine* eng = liveEngine();
     if (eng == nullptr) {
         return InvalidClipId;
     }
@@ -190,27 +186,23 @@ void AudioEditorSession::bindChrome() {
     _streamTrackLabel =
         dynamic_cast<ayt::ui::TextLabel*>(_ui->findById("lbl_stream_track"));
 
-    bindButton("btn_play_440", [this]() { playBeep(_clipA, AudioBus::Sfx); });
-    bindButton("btn_play_880", [this]() { playBeep(_clipB, AudioBus::Ui); });
+    bindButton("btn_play_440", [this]() { if (ensureClips()) playBeep(_clipA, AudioBus::Sfx); });
+    bindButton("btn_play_880", [this]() { if (ensureClips()) playBeep(_clipB, AudioBus::Ui); });
     bindButton("btn_loop_220", [this]() {
-        AudioEngine* eng = _audio ? _audio->engine() : nullptr;
-        if (eng == nullptr || _clipLoop == InvalidClipId) {
+        AudioEngine* eng = liveEngine();
+        if (!ensureClips() || eng == nullptr || _clipLoop == InvalidClipId) {
             return;
         }
         if (_loopVoice != InvalidVoice) {
             eng->stop(_loopVoice);
             _loopVoice = InvalidVoice;
         }
-        _loopVoice = eng->play(_clipLoop, AudioBus::Music, {}, 0.7f, true);
+        _loopVoice = eng->play(_clipLoop, AudioBus::Music, {}, _previewGain, true);
+        eng->setVoicePaused(_loopVoice,_paused);
         refreshStatus();
     });
     bindButton("btn_stop_all", [this]() {
-        AudioEngine* eng = _audio ? _audio->engine() : nullptr;
-        if (eng != nullptr) {
-            eng->stopAll();
-        }
-        _loopVoice = InvalidVoice;
-        stopStream();
+        stopOwned();
         refreshStatus();
     });
     bindButton("btn_pause", [this]() { togglePause(); });
@@ -221,6 +213,19 @@ void AudioEditorSession::bindChrome() {
     bindButton("btn_spatial_r", [this]() { playSpatial(4.0f); });
     bindButton("btn_duck", [this]() { toggleDuck(); });
     bindButton("btn_reverb_preset", [this]() { cycleReverbPreset(); });
+
+    bindButton("btn_octave_down",[this](){ releaseKeys(); _octave=std::max(1,_octave-1); updateKeys(); });
+    bindButton("btn_octave_up",[this](){ releaseKeys(); _octave=std::min(6,_octave+1); updateKeys(); });
+    bindButton("btn_instrument",[this](){ if (ensureClips()) buildInstrument(!_sine); updateKeys(); });
+    bindButton("btn_load_sample",[this](){ loadSample(); });
+    bindButton("btn_release_notes",[this](){ releaseKeys(); });
+    bindButton("btn_sustain",[this](){ if(!ensureClips()) return; _pedalLatch=!_pedalLatch; if (_instrument) _instrument->setSustain(_spaceDown || _pedalLatch); updateKeys(); });
+    bindSlider("sld_velocity",[this](float v){_velocity=v/100.0f;});
+    bindSlider("sld_preview",[this](float v){
+        _previewGain=v/100.0f; if (!ensureClips()) return; if (_instrument) _instrument->setGain(_previewGain);
+        if (auto* e=liveEngine()) { for (auto h:_ownedVoices) e->setVoiceVolume(h,_previewGain); e->setVoiceVolume(_loopVoice,_previewGain); e->setVoiceVolume(_stream.voice,_previewGain); }
+    });
+    updateKeys();
 
     auto* valMaster =
         dynamic_cast<ayt::ui::TextLabel*>(_ui->findById("val_master"));
@@ -233,32 +238,32 @@ void AudioEditorSession::bindChrome() {
         dynamic_cast<ayt::ui::TextLabel*>(_ui->findById("val_timescale"));
 
     bindSlider("sld_master", [this, valMaster](float v) {
-        if (AudioEngine* eng = _audio ? _audio->engine() : nullptr) {
+        if (AudioEngine* eng = !_refreshing ? liveEngine() : nullptr) {
             eng->setMasterGain(v / 100.0f);
         }
         setLabelValue(valMaster, v, true);
     });
     bindSlider("sld_music", [this, valMusic](float v) {
-        if (AudioEngine* eng = _audio ? _audio->engine() : nullptr) {
+        if (AudioEngine* eng = !_refreshing ? liveEngine() : nullptr) {
             eng->setBusGain(AudioBus::Music, v / 100.0f);
         }
         setLabelValue(valMusic, v, true);
     });
     bindSlider("sld_sfx", [this, valSfx](float v) {
-        if (AudioEngine* eng = _audio ? _audio->engine() : nullptr) {
+        if (AudioEngine* eng = !_refreshing ? liveEngine() : nullptr) {
             eng->setBusGain(AudioBus::Sfx, v / 100.0f);
         }
         setLabelValue(valSfx, v, true);
     });
     bindSlider("sld_reverb", [this, valReverb](float v) {
-        if (AudioEngine* eng = _audio ? _audio->engine() : nullptr) {
+        if (AudioEngine* eng = !_refreshing ? liveEngine() : nullptr) {
             eng->setMasterReverbReturn(v / 100.0f);
         }
         setLabelValue(valReverb, v, true);
     });
     bindSlider("sld_timescale", [this, valTs](float v) {
         const float scale = v / 100.0f;
-        if (AudioEngine* eng = _audio ? _audio->engine() : nullptr) {
+        if (AudioEngine* eng = !_refreshing ? liveEngine() : nullptr) {
             eng->setTimeScale(scale);
         }
         setLabelValue(valTs, scale, false);
@@ -272,6 +277,7 @@ void AudioEditorSession::unbindChrome() {
     const char* buttonIds[] = {
         "btn_play_440",   "btn_play_880",      "btn_loop_220",
         "btn_stop_all",   "btn_pause",         "btn_open_stream",
+        "btn_octave_down", "btn_octave_up", "btn_instrument", "btn_load_sample", "btn_release_notes", "btn_sustain",
         "btn_stop_stream","btn_spatial_l",     "btn_spatial_c",
         "btn_spatial_r",  "btn_duck",          "btn_reverb_preset",
     };
@@ -281,7 +287,7 @@ void AudioEditorSession::unbindChrome() {
         }
     }
     const char* sliderIds[] = {
-        "sld_master", "sld_music", "sld_sfx", "sld_reverb", "sld_timescale",
+        "sld_velocity", "sld_preview", "sld_master", "sld_music", "sld_sfx", "sld_reverb", "sld_timescale",
     };
     for (const char* id : sliderIds) {
         if (auto* s = dynamic_cast<ayt::ui::Slider*>(_ui->findById(id))) {
@@ -314,7 +320,7 @@ void AudioEditorSession::setTrackRow(int index, const std::wstring& name,
 }
 
 void AudioEditorSession::refreshTracks() {
-    AudioEngine* eng = _audio ? _audio->engine() : nullptr;
+    AudioEngine* eng = liveEngine();
     int row = 0;
     if (_stream.voice != InvalidVoice) {
         std::wstring pathW;
@@ -327,8 +333,8 @@ void AudioEditorSession::refreshTracks() {
             pathW = L"(stream)";
         }
         wchar_t info[96];
-        std::swprintf(info, 96, L"Music  voice=%u  stream=%u",
-                      _stream.voice, _stream.stream);
+        std::swprintf(info, 96, L"Music  voice=%llu  stream=%u",
+                      static_cast<unsigned long long>(_stream.voice), _stream.stream);
         setTrackRow(row++, L"BGM Stream", info);
         if (_streamTrackLabel != nullptr) {
             _streamTrackLabel->setText(L"Track: " + pathW);
@@ -339,11 +345,13 @@ void AudioEditorSession::refreshTracks() {
 
     if (eng != nullptr) {
         for (uint32_t i = 0; row < 4; ++i) {
-            const VoiceRuntime* vr = eng->voiceAt(i);
-            if (vr == nullptr) {
+            VoiceRuntime snapshot;
+            const VoiceRuntime* vr=&snapshot;
+            if (!eng->voiceStateAt(i,snapshot)) {
                 break;
             }
-            if (!vr->playing) {
+            const bool owned=vr->voiceId==_loopVoice || std::find(_ownedVoices.begin(),_ownedVoices.end(),vr->voiceId)!=_ownedVoices.end();
+            if (!vr->playing || !owned) {
                 continue;
             }
             if (_stream.voice != InvalidVoice
@@ -379,10 +387,17 @@ void AudioEditorSession::refreshTracks() {
 }
 
 void AudioEditorSession::refreshStatus() {
-    AudioEngine* eng = _audio ? _audio->engine() : nullptr;
+    AudioEngine* eng = liveEngine();
     if (eng == nullptr) {
         return;
     }
+    _ownedVoices.erase(std::remove_if(_ownedVoices.begin(),_ownedVoices.end(),[&](VoiceHandle h){VoiceRuntime v; return !eng->voiceState(h,v);}),_ownedVoices.end());
+    _ducked=eng->duckingState().depthDb<0; _reverbPreset=eng->reverbPreset();
+    _refreshing=true;
+    auto sync=[&](const char* id,float value){if (_ui) if (auto* slider=dynamic_cast<ayt::ui::Slider*>(_ui->findById(id))) slider->setValue(value);};
+    sync("sld_master",eng->masterGain()*100); sync("sld_music",eng->busGain(AudioBus::Music)*100); sync("sld_sfx",eng->busGain(AudioBus::Sfx)*100); sync("sld_timescale",eng->timeScale()*100);
+    sync("sld_reverb",eng->reverbReturn()*100);
+    _refreshing=false;
     wchar_t buf[256];
     std::swprintf(buf, 256,
                   L"voices=%u  underruns=%llu  scale=%.2f  duck=%s  reverbP=%u  "
@@ -397,18 +412,19 @@ void AudioEditorSession::refreshStatus() {
 }
 
 void AudioEditorSession::playBeep(AudioClipId clip, AudioBus bus) {
-    AudioEngine* eng = _audio ? _audio->engine() : nullptr;
-    if (eng == nullptr || clip == InvalidClipId) {
+    AudioEngine* eng = liveEngine();
+    if (!ensureClips() || eng == nullptr || clip == InvalidClipId) {
         setStatus(L"No engine / clip");
         return;
     }
-    (void)eng->play(clip, bus, {}, 1.0f, false);
+    const auto v=eng->play(clip,bus,{},_previewGain,false);
+    if (v) { _ownedVoices.push_back(v); eng->setVoiceEnvelope(v,0.004f,0.015f); eng->setVoicePaused(v,_paused); }
     refreshStatus();
 }
 
 void AudioEditorSession::playSpatial(float x) {
-    AudioEngine* eng = _audio ? _audio->engine() : nullptr;
-    if (eng == nullptr || _clipA == InvalidClipId) {
+    AudioEngine* eng = liveEngine();
+    if (!ensureClips() || eng == nullptr || _clipA == InvalidClipId) {
         return;
     }
     SpatializationParams sp{};
@@ -418,7 +434,8 @@ void AudioEditorSession::playSpatial(float x) {
     sp.maxDistance = 40.0f;
     sp.spatialBlend = 1.0f;
     sp.reverbSend = 0.35f;
-    (void)eng->play(_clipA, AudioBus::Sfx, sp, 1.0f, false);
+    const auto v=eng->play(_clipA,AudioBus::Sfx,sp,_previewGain,false);
+    if (v) { _ownedVoices.push_back(v); eng->setVoiceEnvelope(v,0.004f,0.015f); eng->setVoicePaused(v,_paused); }
     refreshStatus();
 }
 
@@ -431,8 +448,10 @@ void AudioEditorSession::openStream() {
         setStatus(L"No path picker (host must setPathPicker)");
         return;
     }
+    if (!ensureClips()) return;
+    releaseKeys();
     const std::string path = _pathPicker();
-    if (path.empty()) {
+    if (path.empty() || !ensureClips()) {
         setStatus(L"Stream cancelled");
         return;
     }
@@ -440,7 +459,7 @@ void AudioEditorSession::openStream() {
         _audio->stopStreaming(_stream);
         _stream = {};
     }
-    _stream = _audio->playStreamingFile(path, AudioBus::Music, true, 1.5f);
+    _stream = _audio->playStreamingFile(path, AudioBus::Music, true, _previewGain);
     if (_stream.voice == InvalidVoice) {
         _streamPath.clear();
         setStatus(L"Stream open failed — check .wav/.mp3/.ogg + path");
@@ -449,47 +468,41 @@ void AudioEditorSession::openStream() {
     }
     _streamPath = path;
     AudioEngine* eng = _audio->engine();
-    eng->setMasterGain(1.0f);
-    eng->setBusGain(AudioBus::Music, 1.0f);
-    if (_clipA != InvalidClipId) {
-        (void)eng->play(_clipA, AudioBus::Sfx, {}, 0.55f, false);
-    }
-    setStatus(L"Streaming (+cue beep)");
-    refreshStatus();
+    eng->setVoicePaused(_stream.voice,_paused);
+    setStatus(L"Streaming");
     refreshTracks();
 }
 
 void AudioEditorSession::stopStream() {
-    if (_audio != nullptr && _stream.voice != InvalidVoice) {
+    if (liveEngine() == _boundEngine && liveEngine() && liveEngine()->lifecycleGeneration()==_engineGeneration && _stream.voice != InvalidVoice) {
         _audio->stopStreaming(_stream);
-        _stream = {};
     }
+    _stream = {};
     _streamPath.clear();
     refreshStatus();
     refreshTracks();
 }
 
 void AudioEditorSession::togglePause() {
-    AudioEngine* eng = _audio ? _audio->engine() : nullptr;
+    if (!ensureClips()) return;
+    AudioEngine* eng = liveEngine();
     if (eng == nullptr) {
         return;
     }
-    if (_paused) {
-        eng->resume();
-        _paused = false;
-    } else {
-        eng->pause();
-        _paused = true;
-    }
+    _paused=!_paused;
+    for (auto v:_ownedVoices) eng->setVoicePaused(v,_paused);
+    eng->setVoicePaused(_loopVoice,_paused); eng->setVoicePaused(_stream.voice,_paused);
+    if (_instrument) _instrument->setPaused(_paused);
+    if (_ui) if (auto* b=dynamic_cast<ayt::ui::Button*>(_ui->findById("btn_pause"))) b->setText(_paused ? L"Resume Preview" : L"Pause Preview");
     refreshStatus();
 }
 
 void AudioEditorSession::toggleDuck() {
-    AudioEngine* eng = _audio ? _audio->engine() : nullptr;
+    AudioEngine* eng = liveEngine();
     if (eng == nullptr) {
         return;
     }
-    _ducked = !_ducked;
+    _ducked = !(eng->duckingState().depthDb<0);
     if (_ducked) {
         eng->setDucking(-12.0f, 40.0f, 8.0f);
     } else {
@@ -499,13 +512,136 @@ void AudioEditorSession::toggleDuck() {
 }
 
 void AudioEditorSession::cycleReverbPreset() {
-    AudioEngine* eng = _audio ? _audio->engine() : nullptr;
+    AudioEngine* eng = liveEngine();
     if (eng == nullptr) {
         return;
     }
-    _reverbPreset = static_cast<uint8_t>((_reverbPreset + 1) % 2);
+    _reverbPreset = static_cast<uint8_t>((eng->reverbPreset() + 1) % 2);
     eng->setReverbPreset(_reverbPreset);
     refreshStatus();
+}
+
+void AudioEditorSession::stopOwned() {
+    releaseKeys();
+    auto* e=liveEngine();
+    if (e && e==_boundEngine && e->lifecycleGeneration()==_engineGeneration) {
+        for (auto h:_ownedVoices) e->stop(h);
+        e->stop(_loopVoice);
+    }
+    _ownedVoices.clear(); _loopVoice=InvalidVoice; stopStream();
+}
+void AudioEditorSession::buildInstrument(bool sine) {
+    auto* e=liveEngine(); if (!e) return;
+    releaseKeys(); _instrument.reset();
+    for (auto c:_instrumentClips) e->releaseClip(c); _instrumentClips.clear();
+    _instrument=std::make_unique<SampleInstrument>(*e,16); _instrument->setGain(_previewGain); _instrument->setPaused(_paused);
+    _sine=sine; _instrumentName=sine ? L"Sine" : L"Piano";
+    bool fallback=false;
+    for (int octave=1; octave<=7; ++octave) {
+        const int note=(octave+1)*12;
+        AudioClipId clip=InvalidClipId;
+        if (!sine && !_assetRoot.empty()) {
+            ayt::resource::AudioLoader loader;
+            const auto base=std::filesystem::path(_assetRoot)/"samples"/("C"+std::to_string(octave));
+            auto resource=std::dynamic_pointer_cast<ayt::resource::Audio>(loader.load(base.string()+".aud"));
+            if (!resource) resource=std::dynamic_pointer_cast<ayt::resource::Audio>(loader.load(base.string()+".mp3"));
+            if (resource) clip=_audio->registerClipFromResource(resource.get());
+        }
+        if (!clip) {
+            fallback=true;
+            const auto rate=e->outputSampleRate(); const uint32_t frames=rate*3;
+            std::vector<float> pcm(frames);
+            const double hz=440.0*std::exp2((note-69)/12.0);
+            for (uint32_t f=0; f<frames; ++f) {
+                const double t=static_cast<double>(f)/rate;
+                double sample=std::sin(6.283185307179586*hz*t);
+                if (!sine) sample=sample*std::exp(-t*1.4)+0.35*std::sin(6.283185307179586*hz*2*t)*std::exp(-t*3)+0.12*std::sin(6.283185307179586*hz*3*t)*std::exp(-t*5);
+                pcm[f]=static_cast<float>(sample*0.22*std::min(1.0,t/0.004)*std::min(1.0,(3.0-t)/0.02));
+            }
+            AudioClipDesc desc{}; desc.sampleRate=rate; desc.channels=1; desc.frameCount=frames; desc.pcmData=pcm.data();
+            clip=e->registerClip(desc);
+        }
+        if (clip) { _instrumentClips.push_back(clip); _instrument->addRegion({clip,note,std::max(0,note-6),std::min(127,note+6)}); }
+    }
+    if (!sine && fallback) _instrumentName=L"Piano (generated fallback)";
+}
+void AudioEditorSession::loadSample() {
+    if (!_pathPicker || !ensureClips()) return;
+    releaseKeys(); const auto path=_pathPicker(); if (path.empty() || !ensureClips()) return;
+    ayt::resource::AudioLoader loader;
+    auto resource=std::dynamic_pointer_cast<ayt::resource::Audio>(loader.load(path));
+    if (!resource) {setStatus(L"Sample could not be decoded; choose WAV, MP3, OGG or cooked audio");return;}
+    auto* e=liveEngine(); const auto clip=_audio->registerClipFromResource(resource.get());
+    if (!clip) {setStatus(L"Sample registration failed (clip capacity or PCM format)");return;}
+    _instrument.reset(); for (auto c:_instrumentClips) e->releaseClip(c); _instrumentClips={clip};
+    _instrument=std::make_unique<SampleInstrument>(*e,16); _instrument->setGain(_previewGain); _instrument->setPaused(_paused);
+    const int root=(_octave+1)*12; _instrument->addRegion({clip,root,std::max(0,root-12),std::min(127,root+24)});
+    _instrumentName=L"Sample (root C"+std::to_wstring(_octave)+L")"; updateKeys();
+}
+void AudioEditorSession::pressNote(int index,bool keyboard,bool down) {
+    if (index<0 || index>=13 || !ensureClips() || !_instrument) return;
+    const bool before=_keyboard[index] || _mouse[index];
+    (keyboard ? _keyboard[index] : _mouse[index])=down;
+    const bool after=_keyboard[index] || _mouse[index];
+    const int note=(_octave+1)*12+index;
+    if (!before && after && !_instrument->noteOn(note,_velocity)) setStatus(L"Note unavailable: sample range or voice capacity");
+    if (before && !after) _instrument->noteOff(note);
+    updateKeys();
+}
+bool AudioEditorSession::handleKey(int key,bool pressed) {
+    constexpr int keys[13]={'A','W','S','E','D','F','T','G','Y','H','U','J','K'};
+    if (pressed && _ui && ((_ui->getFocusedWidget() && _ui->getFocusedWidget()->isTextEditingWidget()) || (_ui->getModifiers()&6u))) return false;
+    if (key==32) {
+        if (!ensureClips()) return false;
+        _spaceDown=pressed; if (_instrument) _instrument->setSustain(pressed || _pedalLatch); updateKeys(); return true;
+    }
+    for (int i=0;i<13;++i) if (key==keys[i]) {
+        if (!pressed && !_keyboard[i]) return false;
+        pressNote(i,true,pressed); return true;
+    }
+    return false;
+}
+bool AudioEditorSession::handleMouseButton(float x,float y,int button,bool pressed) {
+    if (button!=0 || !_ui) return false;
+    if (!pressed && _mouseKey>=0) {const int key=_mouseKey;_mouseKey=-1;pressNote(key,false,false);return true;}
+    constexpr int hitOrder[]={1,3,6,8,10,0,2,4,5,7,9,11,12};
+    if (pressed) for (int i:hitOrder) {
+        const auto id="piano_key_"+std::to_string(i); auto* w=_ui->findById(id);
+        if (w && w->hitTest({x,y})) { _mouseKey=i;pressNote(i,false,true);return true; }
+    }
+    return false;
+}
+void AudioEditorSession::releaseKeys() {
+    _keyboard.fill(false); _mouse.fill(false); _mouseKey=-1; _spaceDown=false; _pedalLatch=false;
+    if (_instrument) {
+        const auto* e=liveEngine();
+        if (!e || e!=_boundEngine || e->lifecycleGeneration()!=_engineGeneration) _instrument->abandon();
+        else _instrument->allNotesOff();
+    } updateKeys();
+}
+void AudioEditorSession::updateKeys() {
+    if (!_ui) return;
+    constexpr const wchar_t* notes[]={L"C",L"C#",L"D",L"D#",L"E",L"F",L"F#",L"G",L"G#",L"A",L"A#",L"B",L"C"};
+    constexpr const wchar_t* keys[]={L"A",L"W",L"S",L"E",L"D",L"F",L"T",L"G",L"Y",L"H",L"U",L"J",L"K"};
+    if (auto* sheet=ayt::ui::StyleManager::get().getStyleSheet()) {
+        if (!sheet->containsStyle("audio.key.white")) {
+            auto style=sheet->getComputedStyle("button_default");
+            style.bgToken.clear(); style.textColorToken.clear(); style.borderColorToken.clear();
+            style.backgroundStates={}; style.backgroundTransition={};
+            style.backgroundColor={0.88f,0.88f,0.90f,1}; style.textColor={0.12f,0.12f,0.15f,1};
+            sheet->setStyle("audio.key.white",style);
+            style.backgroundColor={0.12f,0.12f,0.15f,1}; style.textColor={0.96f,0.96f,0.98f,1};
+            sheet->setStyle("audio.key.black",style);
+            style.backgroundColor={0.20f,0.55f,0.90f,1}; sheet->setStyle("audio.key.down",style);
+        }
+    }
+    for (int i=0;i<13;++i) if (auto* b=dynamic_cast<ayt::ui::Button*>(_ui->findById("piano_key_"+std::to_string(i)))) {
+        const bool down=_keyboard[i] || _mouse[i];
+        b->setText((down ? std::wstring(L"● ") : L"")+notes[i]+std::to_wstring(_octave+(i==12 ? 1:0))+L"["+keys[i]+L"]");
+        b->setStyleId(down ? "audio.key.down" : (i==1||i==3||i==6||i==8||i==10 ? "audio.key.black" : "audio.key.white"));
+    }
+    if (auto* l=dynamic_cast<ayt::ui::TextLabel*>(_ui->findById("lbl_instrument"))) l->setText(_instrumentName+L" | C"+std::to_wstring(_octave)+L" | Space: sustain");
+    if (auto* b=dynamic_cast<ayt::ui::Button*>(_ui->findById("btn_sustain"))) b->setText((_pedalLatch||_spaceDown) ? L"Sustain ON" : L"Sustain OFF");
 }
 
 } // namespace ayt::audio

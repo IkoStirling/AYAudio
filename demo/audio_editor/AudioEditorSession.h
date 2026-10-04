@@ -8,6 +8,9 @@
 #include <AYAudio/AudioSubSystem.h>
 
 #include <cstdint>
+#include <array>
+#include <memory>
+#include <AYAudio/SampleInstrument.h>
 #include <functional>
 #include <string>
 #include <vector>
@@ -49,10 +52,33 @@ public:
     // Optional audio update + status chrome refresh.
     void tick(float dt);
 
+    // Native virtual-key values (A..Z/Space). Release is processed even while text editing.
+    bool handleKey(int key, bool pressed);
+    bool handleMouseButton(float x, float y, int button, bool pressed);
+    void releaseKeys();
+    void setAssetRoot(std::string root) { _assetRoot=std::move(root); }
     bool isAttached() const { return _ui != nullptr; }
 
 private:
     bool ensureClips();
+    void releaseResources();
+    void buildInstrument(bool sine = false);
+    void loadSample();
+    void updateKeys();
+    void stopOwned();
+    void pressNote(int index, bool keyboard, bool down);
+    AudioEngine* liveEngine() const;
+    std::unique_ptr<SampleInstrument> _instrument;
+    AudioEngine* _boundEngine = nullptr;
+    uint64_t _engineGeneration = 0;
+    std::vector<AudioClipId> _instrumentClips;
+    std::vector<VoiceHandle> _ownedVoices;
+    std::array<bool,13> _keyboard{}, _mouse{};
+    int _mouseKey=-1, _octave=4;
+    float _velocity=0.8f, _previewGain=0.7f;
+    bool _sine=false, _refreshing=false, _spaceDown=false, _pedalLatch=false;
+    std::string _assetRoot;
+    std::wstring _instrumentName=L"Piano";
     void bindChrome();
     void unbindChrome();
     void refreshStatus();
