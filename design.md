@@ -709,7 +709,10 @@ Built-in unavailable piano roots use the existing generated fallback; missing im
 
 UI input stays on owner thread, no render-worker access to session, widgets or host engine. Worker cancellation
 is atomic; host replacement clears handles without dereferencing an old generation. Shutdown cancels and
-joins the worker before widget destruction. Each acquisition is a new clip, never destructive replacement.
+joins the worker before widget destruction. Focus loss resets wheel/input state and stops/finalizes
+recording (or cancels its preparation), but preserves ordinary playback and its pending preparation.
+Explicit Stop, natural completion, host replacement and teardown retain owned-resource cleanup.
+Each acquisition is a new clip, never destructive replacement.
 Common input mapping/keyboard gates are shared by live sampler and event recorder. Global mixing is untouched.
 Saved v1 documents use schema ay.audio.performance; IDs are unique, numeric positions finite/bounded.
 Canonical Assets paths and file baselines gate atomic saves; references under Assets are relative UTF-8.

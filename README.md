@@ -184,7 +184,9 @@ Clips support independent copy, cross-track move, non-destructive trim and repea
 solo and gains belong to the authoring document, not the shared engine mixer.
 Immutable worker rendering places notes on integer sample frames and powers both owned-voice
 preview and PCM16 WAV export; overlapping equal pitches have independent envelopes. Preparation
-is cancellable. Real-time input uses monotonic event-boundary timestamps, not UI dt; no calibrated
+is cancellable. Arrangement/clip/range auditions keep playing when the window loses focus, including
+preparation already in progress. Focus loss still releases live piano keys and stops/finalizes recording;
+host replacement and teardown cancel preparation and release owned playback. Real-time input uses monotonic event-boundary timestamps, not UI dt; no calibrated
 device-latency or hard-realtime guarantee. PerformanceRenderer is internal demo/editor support.
 Save/open *.performance.json under project Assets; source baseline/path/project checks protect saves.
 Export all or cursor..range-end with release tails, excluding metronome. Missing imported samples fail.
