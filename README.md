@@ -161,8 +161,8 @@ lane overlaps and refuses a project switch, an unrelated existing file, or an
 external edit. Original audio stays intact.
 
 运行谱面 launches `AYAudio_AudioEditor.exe --play-chart <snapshot>` in an
-independent window, including unsaved notes/settings. It has a two-second
-countdown, four falling lanes, tap/hold judgement, combo/error display, restart,
+independent window, including unsaved notes/settings. It has a selectable 0/0.5/2-second
+preparation countdown (default 0.5), four horizontal lanes, per-note accuracy/error display, restart,
 Esc pause/resume and automatic focus-loss pause. The preview owns its music voice;
 the parent stops its own audition, instrument keys and stream before launching.
 `AYEditorStage` also stages this executable/assets for the portable editor.
@@ -170,7 +170,7 @@ the parent stops its own audition, instrument keys and stream before launching.
 This is an authoring preview, not a recommended gameplay API. Timing follows
 normalized clip playback frames with at most 50 ms interpolation; output/input latency
 calibration, variable BPM, configurable key maps, scoring persistence and chart
-cooking are deferred. Undo/redo covers notes, not settings. Temporary preview
+cooking are deferred. Undo/redo covers notes and BPM/beat-offset calibration. Temporary preview
 snapshots are separate from saved assets. See `design.md` for schema/validation
 and `AudioChartTests` / `EditorAudioChartTests` for focused regressions.
 
@@ -192,3 +192,20 @@ Save/open *.performance.json under project Assets; source baseline/path/project 
 Export all or cursor..range-end with release tails, excluding metronome. Missing imported samples fail.
 Limits: fixed BPM/4:4, 64 tracks, 4096 clips, 100k notes, 600s/256MiB output, 1e9 accumulated note frames.
 See [authoring guide](../../AYDocs/AUDIO-AUTHORING.md) §8 and AudioPerformanceTests/EditorAudioPerformanceTests.
+
+## Rhythm-assisted chart authoring (2026-10-06)
+
+Song import asynchronously decodes, extracts waveform peaks, estimates fixed BPM/beat phase and
+normalizes PCM. Reliable estimates apply automatically; silence/steady tones/low-confidence results
+retain manual settings. Manual edits during preparation take precedence. BPM half/double, ±1ms beat
+offset and setting the current song position as beat one are editable and undoable.
+Waveform and chart share seconds/bar:beat grid, cursor, zoom/pan, live seeking and optional follow.
+Generate rhythm draft replaces notes only on explicit action, with sparse/standard/dense snapped taps
+and one reversible history entry. This is an onset-based draft, not semantic musical transcription.
+Preview uses a reusable decoded temporary PCM16 WAV, background preparation and asynchronous child decode.
+Horizontal D/F/J/K lanes show heads, holds and recent grade/accuracy/early-late errors. Accuracy is
+max(0,1−|error|/150ms)×100; holds take the lower endpoint accuracy, misses are 0. Total is the mean
+of finished-note accuracies. Perfect/Good windows remain ±45/150ms; this is not latency calibration.
+Limits: fixed tempo estimated in 60–200 BPM, 4/4 display, ≤600s/256MiB source and normalized PCM;
+first 180s inform tempo, the full song informs draft onsets. Temporary caches live in OS Temp.
+See AUDIO-AUTHORING §11 and AudioChartTests/EditorAudioChartTests.

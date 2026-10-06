@@ -1,6 +1,7 @@
 #include <AYTest.h>
 #include "../demo/audio_editor/ChartDocument.h"
 #include <limits>
+#include "../demo/audio_editor/AudioRhythmAnalysis.h"
 using namespace ayt::audio::chart;
 TEST_SUITE(AudioChartTests)
 TEST_CASE(VersionedChartRoundTripRejectsInvalidAndOverlappingNotes) {
@@ -36,4 +37,43 @@ TEST_CASE(ProjectPathsRejectTraversalAndAbsoluteReferences) {
     auto rejects=[&](const char* path){try{containedPath(utf8(root),path);return false;}catch(...){return true;}};
     CHECK(rejects("../escape.chart.json"));CHECK(rejects("audio/../../escape.chart.json"));CHECK(rejects("C:/outside.chart.json"));CHECK(rejects("/outside.chart.json"));CHECK(rejects("."));
 }
+TEST_CASE(RhythmAnalysisDetectsTempoPhaseAndHandlesSilenceCancellation){
+    using namespace ayt::audio;
+    for(double bpm:{72.,90.,120.,137.,175.}){
+        const int rate=8000;const double phase=.137;std::vector<float> pcm(rate*30);
+        for(double t=phase;t<30;t+=60/bpm)for(int i=0;i<100;++i){const size_t f=size_t(t*rate)+i;if(f<pcm.size())pcm[f]=float(std::exp(-i/15.)*std::sin(i*.85));}
+        const auto a=rhythm::analyze(pcm.size(),2,rate,[&](size_t f,unsigned c){return c?-pcm[f]:pcm[f];});
+        CHECK(a.reliable());CHECK(std::abs(a.bpm-bpm)<.7);CHECK(std::abs(a.offset-phase)<.015);CHECK(a.onsets.size()>20);
+    }
+    auto quiet=rhythm::analyze(8000*10,1,8000,[](size_t,unsigned){return 0.f;});CHECK_FALSE(quiet.reliable());CHECK(quiet.onsets.empty());
+    auto constant=rhythm::analyze(8000*10,1,8000,[](size_t f,unsigned){return float(.2*std::sin(f*.17));});CHECK_FALSE(constant.reliable());
+    auto cancel=std::make_shared<std::atomic<bool>>(true);bool cancelled=false;
+    try{rhythm::analyze(8000,1,8000,[](size_t,unsigned){return .2f;},cancel);}catch(...){cancelled=true;}CHECK(cancelled);
+}
+TEST_CASE(RhythmDraftDensitySnapsValidNotesAndTimingHistoryIsReversible){
+    ayt::audio::rhythm::Analysis a;for(int i=0;i<80;++i)a.onsets.push_back({.137+i*.125,1});
+    Document doc;doc.audio="music.wav";doc.bpm=120;doc.offset=.137;doc.notes={{3,.5,.5}};
+    const auto sparse=ayt::audio::rhythm::draft(a,doc,10,0),dense=ayt::audio::rhythm::draft(a,doc,10,2);
+    CHECK(dense.size()>sparse.size());CHECK(dense.size()==79); // last onset snaps beyond the duration boundary
+    for(const auto& n:dense){CHECK(n.time==n.end);CHECK(std::abs(doc.snap(n.time,4)-n.time)<1e-9);}
+    History h;h.remember(doc);const auto original=doc;doc.notes=dense;doc.validate(10);doc.bpm=137;doc.offset=.14;
+    CHECK(h.move(doc,true));CHECK(doc.notes==original.notes);CHECK(doc.bpm==120);CHECK(doc.offset==.137);
+    CHECK(h.move(doc,false));CHECK(doc.notes==dense);CHECK(doc.bpm==137);CHECK(doc.offset==.14);
+}
+TEST_CASE(PerNoteAccuracyReportsHeadsTailsMissesAndIgnoresRepeatedKeys){
+    Document d;d.audio="music.wav";d.notes={{0,1,1},{1,2,3},{2,4,4}};Judge j;j.reset(d);
+    j.key(d,0,true,.97);CHECK(j.feedback.size()==1);CHECK(std::abs(j.accuracies[0]-80)<1e-6);CHECK(j.feedback.back().error<0);
+    j.key(d,0,true,.98);CHECK(j.feedback.size()==1);j.key(d,0,false,1.1);
+    j.key(d,1,true,2.02);CHECK(j.states[1]==Judge::Holding);CHECK_FALSE(j.feedback.back().release);
+    j.key(d,1,false,2.9);CHECK(j.states[1]==Judge::Good);CHECK(j.feedback.back().release);CHECK(std::abs(j.accuracies[1]-100/3.)<1e-6);
+    j.update(d,4.2);CHECK(j.states[2]==Judge::Miss);CHECK(j.feedback.back().accuracy==0);CHECK(j.count(Judge::Miss)==1);
+    CHECK(std::abs(j.totalAccuracy()-(80+100/3.)/3)<1e-6);
+}
+TEST_CASE(OrderedJudgeVisitsOnlyDueNotesAndBoundsRecentFeedback){
+    Document d;d.audio="music.wav";for(int i=99999;i>=0;--i)d.notes.push_back({i%4,i*.25,i*.25});
+    Judge j;j.reset(d);CHECK(j.order.size()==100000);CHECK(j.order.front()==99999);j.update(d,1.2);
+    CHECK(j.due==5);CHECK(j.count(Judge::Miss)==5);const auto due=j.due;j.update(d,1.2);CHECK(j.due==due);
+    j.update(d,10);CHECK(j.feedback.size()==8);CHECK(j.count(Judge::Miss)==40);
+}
+
 TEST_SUITE_END

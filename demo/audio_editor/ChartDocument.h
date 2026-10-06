@@ -75,30 +75,63 @@ inline std::string read(const std::filesystem::path& file) {
     return {std::istreambuf_iterator<char>(in),std::istreambuf_iterator<char>()};
 }
 struct History {
-    std::vector<std::vector<Note>> undo,redo;
-    void remember(const Document& d){undo.push_back(d.notes);if(undo.size()>100)undo.erase(undo.begin());redo.clear();}
-    bool move(Document& d,bool backwards){auto& source=backwards?undo:redo;auto& dest=backwards?redo:undo;if(source.empty())return false;dest.push_back(d.notes);d.notes=std::move(source.back());source.pop_back();return true;}
+    struct Snapshot {std::vector<Note> notes;double bpm=120,offset=0;};
+    std::vector<Snapshot> undo,redo;
+    void remember(const Document& d){undo.push_back({d.notes,d.bpm,d.offset});if(undo.size()>100)undo.erase(undo.begin());redo.clear();}
+    bool move(Document& d,bool backwards){auto& source=backwards?undo:redo;auto& dest=backwards?redo:undo;if(source.empty())return false;dest.push_back({d.notes,d.bpm,d.offset});d.notes=std::move(source.back().notes);d.bpm=source.back().bpm;d.offset=source.back().offset;source.pop_back();return true;}
 };
-// Small deterministic judgement core used by the independent preview only.
+// Event-time judgement with ordered pending notes; per-frame work visits due notes only.
 struct Judge {
     enum State {Pending,Holding,Perfect,Good,Miss};
+    struct Feedback {size_t note=0;State result=Pending;double error=0,accuracy=0,time=0;bool release=false;};
     std::vector<State> states,heads;
+    std::vector<double> errors,accuracies;
+    std::vector<size_t> order;
+    std::array<std::vector<size_t>,4> lanes;
+    std::array<size_t,4> laneCursor{};
+    std::array<int,4> holding{-1,-1,-1,-1};
+    size_t due=0;
+    std::vector<Feedback> feedback;
     std::array<bool,4> held{};
-    int combo=0,maxCombo=0; double lastError=0;
-    void reset(const Document& d){states.assign(d.notes.size(),Pending);heads=states;held.fill(false);combo=maxCombo=0;lastError=0;}
-    void finish(size_t i,State result){states[i]=result;combo=result==Miss?0:combo+1;maxCombo=std::max(maxCombo,combo);}
-    static State grade(double error){return std::abs(error)<=.045?Perfect:Good;}
-    void key(const Document& d,int lane,bool down,double now) {
-        if(lane<0 || lane>=4 || held[lane]==down)return;
-        held[lane]=down;
-        if(!down){for(size_t i=0;i<states.size();++i)if(states[i]==Holding && d.notes[i].lane==lane){lastError=now-d.notes[i].end;finish(i,std::abs(lastError)>.15?Miss:(heads[i]==Perfect?grade(lastError):Good));}return;}
-        size_t best=states.size();double distance=.150000001;
-        for(size_t i=0;i<states.size();++i)if(states[i]==Pending && d.notes[i].lane==lane){const double diff=std::abs(now-d.notes[i].time);if(diff<distance){distance=diff;best=i;}}
-        if(best==states.size())return;
-        lastError=now-d.notes[best].time;heads[best]=grade(lastError);
-        if(d.notes[best].end>d.notes[best].time)states[best]=Holding;else finish(best,heads[best]);
+    int combo=0,maxCombo=0;double lastError=0,judgedAccuracy=0;std::array<int,5> counts{};
+    void reset(const Document& d){
+        states.assign(d.notes.size(),Pending);heads=states;errors.assign(states.size(),0);accuracies.assign(states.size(),0);
+        held.fill(false);holding.fill(-1);laneCursor.fill(0);due=0;combo=maxCombo=0;lastError=judgedAccuracy=0;counts.fill(0);feedback.clear();
+        order.resize(states.size());for(size_t i=0;i<order.size();++i)order[i]=i;
+        std::stable_sort(order.begin(),order.end(),[&](size_t a,size_t b){return d.notes[a].time<d.notes[b].time;});
+        for(auto& lane:lanes)lane.clear();for(auto i:order)lanes[d.notes[i].lane].push_back(i);
     }
-    void update(const Document& d,double now){for(size_t i=0;i<states.size();++i){if(states[i]==Pending && now>d.notes[i].time+.15)finish(i,Miss);else if(states[i]==Holding && now>=d.notes[i].end)finish(i,held[d.notes[i].lane]?heads[i]:Miss);}}
-    int count(State s)const{return static_cast<int>(std::count(states.begin(),states.end(),s));}
+    static double accuracy(double error){return std::clamp(1-std::abs(error)/.15,0.0,1.0)*100;}
+    static State grade(double error){return std::abs(error)<=.045?Perfect:Good;}
+    void notify(size_t i,State result,double error,double now,bool release=false){
+        feedback.push_back({i,result,error,result==Miss?0:accuracies[i],now,release});
+        if(feedback.size()>8)feedback.erase(feedback.begin());lastError=error;
+    }
+    void finish(size_t i,State result){if(states[i]>=Perfect)return;states[i]=result;if(result==Miss)accuracies[i]=0;++counts[result];judgedAccuracy+=accuracies[i];
+        combo=result==Miss?0:combo+1;maxCombo=std::max(maxCombo,combo);}
+    void key(const Document& d,int lane,bool down,double now){
+        if(lane<0||lane>=4||held[lane]==down)return;held[lane]=down;
+        if(!down){const int h=holding[lane];if(h>=0&&states[h]==Holding){
+                const double error=now-d.notes[h].end;errors[h]=error;accuracies[h]=std::min(accuracies[h],accuracy(error));
+                const auto result=std::abs(error)>.15?Miss:(heads[h]==Perfect?grade(error):Good);
+                finish(h,result);notify(h,result,error,now,true);}holding[lane]=-1;return;}
+        auto& indices=lanes[lane];auto& cursor=laneCursor[lane];
+        while(cursor<indices.size()&&(states[indices[cursor]]!=Pending||d.notes[indices[cursor]].time<now-.15))++cursor;
+        size_t best=states.size();double distance=.150000001;
+        for(size_t p=cursor;p<indices.size();++p){const size_t i=indices[p];if(d.notes[i].time>now+.15)break;
+            if(states[i]!=Pending)continue;const double diff=std::abs(now-d.notes[i].time);if(diff<distance){distance=diff;best=i;}}
+        if(best==states.size())return;
+        const double error=now-d.notes[best].time;errors[best]=error;accuracies[best]=accuracy(error);heads[best]=grade(error);
+        if(d.notes[best].end>d.notes[best].time){states[best]=Holding;holding[lane]=int(best);notify(best,heads[best],error,now);}
+        else{finish(best,heads[best]);notify(best,heads[best],error,now);}
+    }
+    void update(const Document& d,double now){
+        while(due<order.size()&&d.notes[order[due]].time+.15<now){const auto i=order[due++];
+            if(states[i]==Pending){errors[i]=.15;finish(i,Miss);notify(i,Miss,.15,now);}}
+        for(int lane=0;lane<4;++lane){const int i=holding[lane];if(i>=0&&states[i]==Holding&&now>=d.notes[i].end){
+                finish(i,held[lane]?heads[i]:Miss);notify(i,states[i],0,now,true);holding[lane]=-1;}}
+    }
+    int count(State s)const{if(s>=Perfect)return counts[s];int active=0;for(int i:holding)if(i>=0 && states[i]==Holding)++active;return s==Holding?active:int(states.size())-active-counts[Perfect]-counts[Good]-counts[Miss];}
+    double totalAccuracy()const{const int n=counts[Perfect]+counts[Good]+counts[Miss];return n?judgedAccuracy/n:100;}
 };
 }

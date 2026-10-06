@@ -725,3 +725,42 @@ the burst, ending after a 300ms idle gap or focus loss. No input phase is availa
 Both native hosts forward the same logical-coordinate hook. Track rows/gutter draw separators after clips.
 Record-backing monitor defaults on for overdubbing; disabling it renders an empty backing document
 with the original BPM/range/metronome, without modifying saved tracks or live instrument output.
+
+## Rhythm assistance and horizontal chart preview (2026-10-06)
+
+AudioRhythmAnalysis.h is reusable internal authoring support, independent of AYUI/Host. It builds
+a 5ms energy/attack novelty envelope, locally thresholds onset peaks (including an energy-relative
+floor), and estimates normalized lag correlation plus circular onset-phase agreement to reduce
+half-tempo aliases. Weighted regression refines tempo; weighted phase estimates a beat candidate.
+This does not identify semantic bar downbeats or variable tempo. Detection needs ≥6 peaks and
+confidence ≥0.32 to apply; manual fields/half/double/offset remain authoritative. No third-party
+analysis code/model or license dependency is added. Onsets drive density-filtered, beat-snapped
+four-lane taps; explicit generation records one undo step, retains original audio and is editable.
+
+ChartDesk owns cancel/join futures. Workers decode/sample/analyze/normalize immutable inputs;
+main-thread poll validates duration/project and registers PCM against the current engine generation.
+Unsupported/overlapping replacement audio leaves existing music/document intact. BPM/phase edits made
+while loading win over detection. Saved chart loads preserve authored timing and never auto-replace it.
+Source/normalized PCM are each bounded to 256MiB/600s; this is not a total process-memory limit.
+Decoder calls themselves are not interruptible; cancellation is checked on returned PCM processing.
+
+Waveform overlay and ChartCanvas share one origin/visible/position and bar:beat/sec ruler. Seeking
+updates the owned audition read head; chart line shares the waveform line's X position. Optional
+follow pans after crossing 80% of the viewport; navigation does not dirty the chart. History snapshots
+cover notes/BPM/offset; applying a timing correction changes the grid, not existing note timestamps.
+
+Running snapshots copy current authoring values before async preparation, retaining unsaved edits.
+First run writes normalized PCM16 WAV compatible with the existing S16 decoder to a unique Temp cache on a worker; repeated runs reuse it.
+Each child receives a unique chart snapshot referencing that cache, with optional transient
+previewSongName metadata (not needed by saved v1 chart readers). Cache/snapshots intentionally outlive
+the parent so a starting child can finish loading; OS Temp cleanup is external. Cold process/GPU
+initialization remains, but full compressed-song decode is not repeated in the child. Child decode
+and peak extraction are asynchronous, so attach is responsive; countdown begins after registration.
+Default 0.5s preparation is selectable as 0/0.5/2s. Focus loss during preparation pauses after readiness.
+
+Horizontal notes travel right to left toward a fixed left hit line; four DFJK rows respond to held keys.
+Judge stores per-note errors/accuracy and bounded recent feedback for taps, hold heads/tails and misses.
+Due-note and lane indexes are sorted once at reset; update visits due notes plus ≤4 holds, rendering
+binary-searches the next six seconds. Grade counts/accuracy aggregates are maintained incrementally.
+The percentage is a transparent timing metric, not a probability or formal game scoring standard.
+Existing v1 authoring format stays compatible and no public gameplay capability is introduced.

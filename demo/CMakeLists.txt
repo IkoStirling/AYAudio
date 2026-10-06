@@ -93,6 +93,7 @@ set_property(SOURCE audio_editor/AudioEditorSession.cpp APPEND PROPERTY OBJECT_D
     "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/AudioWorkbench.inl"
     "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/ChartWorkbench.inl"
     "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/ChartDocument.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/AudioRhythmAnalysis.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/PerformanceDocument.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/PerformanceRenderer.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/PerformanceCanvas.inl"

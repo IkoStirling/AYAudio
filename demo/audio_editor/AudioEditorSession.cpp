@@ -1,5 +1,7 @@
 #include "AudioEditorSession.h"
 #include "ChartDocument.h"
+#include "AudioRhythmAnalysis.h"
+#include <optional>
 #include "PerformanceRenderer.h"
 #include <future>
 #include <atomic>

@@ -282,25 +282,27 @@ class Waveform final : public LeafWidget
     std::vector<float> peaks;
     double duration = 0, begin = 0, end = 0, position = 0, visible = 0, origin = 0;
     int handle = 0;
-    bool editableRange=true, showSelection=true;
+    bool editableRange=true, showSelection=true, navigable=true;
+    float contentInset=0;
     std::wstring emptyText=L"选择音频资源后显示真实波形";
     std::function<void(double, double, bool)> onRange;
     std::function<void(double)> onSeek;
+    std::function<void(IRenderBackend&)> overlay;
     double time(float x) const
     {
-        const auto b = getWorldBounds();
+        auto b = getWorldBounds();b.minX+=contentInset;
         return std::clamp(origin + (x - b.minX) / std::max(1.0f, b.maxX - b.minX) * (visible > 0 ? visible : duration),
                           0.0, duration);
     }
     float x(double t) const
     {
-        const auto b = getWorldBounds();
+        auto b = getWorldBounds();b.minX+=contentInset;
         return b.minX +
                static_cast<float>((t - origin) / std::max(.001, visible > 0 ? visible : duration)) * (b.maxX - b.minX);
     }
     bool onMouseButtonDown(const UIMouseEvent &e) override
     {
-        if (e.mouseButton != 0 || duration <= 0)
+        if (!navigable || e.mouseButton != 0 || duration <= 0)
             return false;
         if (!editableRange) { if(onSeek) onSeek(time(e.mousePos.x)); return static_cast<bool>(onSeek); }
         handle = std::abs(e.mousePos.x - x(begin)) < 10 ? 1 : std::abs(e.mousePos.x - x(end)) < 10 ? 2 : 0;
@@ -339,7 +341,7 @@ class Waveform final : public LeafWidget
     }
     bool onMouseWheel(const UIMouseWheelEvent &e) override
     {
-        if (duration <= 0)
+        if (!navigable || duration <= 0)
             return false;
         const double anchor = time(e.mousePos.x),
                      fraction = (e.mousePos.x - getWorldBounds().minX) / std::max(1.0f, getSize().x);
@@ -360,6 +362,7 @@ class Waveform final : public LeafWidget
             return;
         }
         renderer.pushClip(b);
+        if(overlay)overlay(renderer); // Keep waveform peaks and playback line above the beat grid.
         const float center = (b.minY + b.maxY) / 2 + 10, height = (b.maxY - b.minY) * .35f;
         const auto accent = color("$color.accent");
         const auto background = color("$color.bg.surface");
@@ -384,7 +387,7 @@ class Waveform final : public LeafWidget
             renderer.drawRect({std::max(b.minX,x(end)-2),b.minY+24,x(end),b.maxY},accent);
         if(x(position)>=b.minX && x(position)<=b.maxX)
             renderer.drawRect({x(position),b.minY+24,std::min(b.maxX,x(position)+1),b.maxY},color("$color.text.primary"));
-        for (int i = 0; i <= 4; ++i)
+        if(!overlay) for (int i = 0; i <= 4; ++i)
         {
             const double t = origin + (visible > 0 ? visible : duration) * i / 4;
             const float px = b.minX + (b.maxX - b.minX) * i / 4;
@@ -694,7 +697,7 @@ struct AudioEditorSession::Workbench
         if(!s._chartPreviewFile.empty()) {
             auto* page=new VBox();page->setSpacing(10);root->addWidget(page);
             buildChart(page,true);
-            if(chart->loadFile(std::filesystem::u8path(s._chartPreviewFile)))chart->start();
+            chart->loadFile(std::filesystem::u8path(s._chartPreviewFile),true);
             return;
         }
         auto *heading = row(root, 80);

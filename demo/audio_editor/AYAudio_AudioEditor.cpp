@@ -339,11 +339,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         return 1;
     }
 
+    const int windowWidth=chartPreview.empty()?kWidth:1200;
+    const int windowHeight=chartPreview.empty()?kHeight:820;
     ayt::device::DeviceManager devices;
     ayt::device::DeviceConfig cfg{};
     cfg.window.title = chartPreview.empty()?"AYAudio Editor":"AYAudio Chart Preview";
-    cfg.window.width = kWidth;
-    cfg.window.height = kHeight;
+    cfg.window.width = windowWidth;
+    cfg.window.height = windowHeight;
     if (!devices.initialize(cfg))
     {
         std::fprintf(stderr, "[AYAudio_AudioEditor] DeviceManager init failed\n");
@@ -364,8 +366,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     ayt::render::Renderer renderer;
     ayt::render::InitDesc init{};
     init.windowHandle = hwnd;
-    init.width = kWidth;
-    init.height = kHeight;
+    init.width = windowWidth;
+    init.height = windowHeight;
     init.vsync = true;
     init.msaa = 0;
     if (!renderer.initialize(init))
@@ -385,7 +387,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         audio.shutdown();
         return 1;
     }
-    uiBackend.setFramebufferSize(static_cast<uint16_t>(kWidth), static_cast<uint16_t>(kHeight));
+    uiBackend.setFramebufferSize(static_cast<uint16_t>(windowWidth), static_cast<uint16_t>(windowHeight));
 
     ayt::ui::UIManager ui;
     ui.initialize(&uiBackend);
@@ -397,8 +399,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     state.renderer = &renderer;
     state.uiBackend = &uiBackend;
     state.devices = &devices;
-    state.clientW = kWidth;
-    state.clientH = kHeight;
+    state.clientW = windowWidth;
+    state.clientH = windowHeight;
 
     const std::string chromePath = resolveChromePath();
     if (!ui.loadLayout(chromePath))
@@ -411,7 +413,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         audio.shutdown();
         return 1;
     }
-    ui.setClientSize(static_cast<float>(kWidth), static_cast<float>(kHeight));
+    ui.setClientSize(static_cast<float>(windowWidth), static_cast<float>(windowHeight));
 
     ayt::audio::AudioEditorSession session;
     state.session = &session;
