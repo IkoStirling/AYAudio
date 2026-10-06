@@ -32,6 +32,10 @@ add_executable(AYAudio_AudioEditor WIN32
     audio_editor/AYAudio_AudioEditor.cpp
     audio_editor/AudioEditorSession.cpp
     audio_editor/AudioEditorSession.h
+    audio_editor/PerformanceDocument.h
+    audio_editor/PerformanceRenderer.h
+    audio_editor/PerformanceWorkbench.inl
+    audio_editor/PerformanceCanvas.inl
     audio_editor/ChartDocument.h
     audio_editor/ChartWorkbench.inl
 )
@@ -88,4 +92,8 @@ endif()
 set_property(SOURCE audio_editor/AudioEditorSession.cpp APPEND PROPERTY OBJECT_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/AudioWorkbench.inl"
     "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/ChartWorkbench.inl"
-    "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/ChartDocument.h")
+    "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/ChartDocument.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/PerformanceDocument.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/PerformanceRenderer.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/PerformanceCanvas.inl"
+    "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/PerformanceWorkbench.inl")

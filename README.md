@@ -88,7 +88,7 @@ The resource page decodes real PCM waveform peaks, previews source intervals,
 and edits gain/fades with undo/redo. Save writes the existing schema-v2
 `*.timeline.json` atomically; source PCM remains intact. A selected interval
 becomes a clip at timeline 0 with sourceOffset; timeline preview is 0..clip length.
-Complex/unsupported sidecars are read-only. MIDI, multi-track recording, rendered
+Complex/unsupported sidecars are read-only. MIDI and device-capture multi-track recording, resource-page rendered
 audio export, arbitrary volume envelopes, saved preset libraries and a separate
 editor preview bus remain disabled placeholders.
 
@@ -173,3 +173,20 @@ calibration, variable BPM, configurable key maps, scoring persistence and chart
 cooking are deferred. Undo/redo covers notes, not settings. Temporary preview
 snapshots are separate from saved assets. See `design.md` for schema/validation
 and `AudioChartTests` / `EditorAudioChartTests` for focused regressions.
+
+## Performance clips and arrangement (2026-10-06)
+
+The first tab is now 演奏与编排: a scrollable clip timeline/piano roll with a pinned piano strip.
+Real-time takes quantize heads, retain physical duration and sustain; step chords use selected
+1/half/quarter/eighth-beat duration and restore the cursor with undo/redo. Direct track headers
+replace track dropdown selection; drag the ruler/blank timeline or middle-drag to pan, wheel to zoom.
+Clips support independent copy, cross-track move, non-destructive trim and repeats. Track mute,
+solo and gains belong to the authoring document, not the shared engine mixer.
+Immutable worker rendering places notes on integer sample frames and powers both owned-voice
+preview and PCM16 WAV export; overlapping equal pitches have independent envelopes. Preparation
+is cancellable. Real-time input uses monotonic event-boundary timestamps, not UI dt; no calibrated
+device-latency or hard-realtime guarantee. PerformanceRenderer is internal demo/editor support.
+Save/open *.performance.json under project Assets; source baseline/path/project checks protect saves.
+Export all or cursor..range-end with release tails, excluding metronome. Missing imported samples fail.
+Limits: fixed BPM/4:4, 64 tracks, 4096 clips, 100k notes, 600s/256MiB output, 1e9 accumulated note frames.
+See [authoring guide](../../AYDocs/AUDIO-AUTHORING.md) §8 and AudioPerformanceTests/EditorAudioPerformanceTests.

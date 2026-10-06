@@ -688,3 +688,30 @@ AudioChartTests covers format, bad notes, snapping, history, judgement and path
 containment. EditorAudioChartTests covers save/reopen, relative music, unsaved
 snapshot isolation, project-switch refusal, sample-rate conversion, key repeats,
 tap/hold judgement and focus pause without pausing the shared engine.
+
+## Performance authoring v1 (2026-10-06)
+
+Internal `demo/audio_editor/PerformanceDocument.h` models Document/Track/Clip/Note/Pedal with
+96000 integer ticks per beat and separate raw timing. Each clip snapshots an instrument (piano,
+sine, imported sample; root/gain/attack/release). Placement, source trim and loop count are independent.
+History snapshots document plus selected track/clip and cursor; chords are one step transaction.
+Take uses event-boundary monotonic elapsed time, snaps heads, and preserves actual gate duration.
+Stop completes held notes/pedal and rounds the clip boundary upwards without stretching note duration.
+
+PerformanceRenderer reads an immutable copy on std::async; UI never schedules individual playback
+notes. All heads/releases map to integer sample frames; per-note sample interpolation and gain/envelope
+are independent, including repeated equal pitches. Sustain extends key release until pedal up or source
+boundary. Trim reconstructs the source head, releases at boundary; release tails may overlap loops.
+The same stereo F32 rendering is registered as one owner voice (Master bus) for playback or encoded
+as PCM16 RIFF for export. Host master/timeScale can still affect monitored playback, while exports use
+saved document gain/BPM and no engine effects. Metronome only enters record backing, never export.
+Built-in unavailable piano roots use the existing generated fallback; missing imported files are errors.
+
+UI input stays on owner thread, no render-worker access to session, widgets or host engine. Worker cancellation
+is atomic; host replacement clears handles without dereferencing an old generation. Shutdown cancels and
+joins the worker before widget destruction. Each acquisition is a new clip, never destructive replacement.
+Common input mapping/keyboard gates are shared by live sampler and event recorder. Global mixing is untouched.
+Saved v1 documents use schema ay.audio.performance; IDs are unique, numeric positions finite/bounded.
+Canonical Assets paths and file baselines gate atomic saves; references under Assets are relative UTF-8.
+WAV targets use unique timestamp suffixes; project changes while preparing reject publication.
+No new gameplay capability/cook/loader is introduced. Full behavior and limits: AUDIO-AUTHORING §8.

@@ -393,6 +393,7 @@ class Waveform final : public LeafWidget
 };
 
 #include "ChartWorkbench.inl"
+#include "PerformanceWorkbench.inl"
 } // namespace workbench
 
 struct AudioEditorSession::Workbench
@@ -410,6 +411,7 @@ struct AudioEditorSession::Workbench
     workbench::Meter *meter = nullptr;
     workbench::Waveform *wave = nullptr;
     std::unique_ptr<workbench::ChartDesk> chart;
+    std::unique_ptr<workbench::PerformanceDesk> performance;
     ayt::ui::TextLabel *instrument = nullptr, *resourceName = nullptr, *resourceStatus = nullptr, *diagnostic = nullptr,
                        *noteStatus = nullptr;
     ayt::ui::CheckBox *keyboardEnabled = nullptr, *loop = nullptr;
@@ -713,8 +715,20 @@ struct AudioEditorSession::Workbench
         auto *performance = new VBox();
         performance->setPadding(12, 14, 12, 8);
         performance->setSpacing(4);
-        addPage(L"音源演奏", performance);
-        auto *p = row(performance);
+        auto* performancePage=new VBox();performancePage->setSpacing(6);
+        auto* performanceScroll=new ayt::ui::ScrollView();performanceScroll->setHorizontalScrollBarEnabled(false);performanceScroll->setContentOwned(performance);
+        performancePage->addWidget(performanceScroll);
+        auto* pianoPane=new VBox();pianoPane->setPadding(12,4,12,4);pianoPane->setSpacing(3);performancePage->addWidget(pianoPane,284);
+        tabs->addTabOwned(L"演奏与编排",performancePage);
+        this->performance=std::make_unique<workbench::PerformanceDesk>(s,performance,
+            [this]{return s.liveEngine();},[this]{return recordingRoot();},s._recordingFolderPicker,
+            [this]{performance::Instrument result;result.kind=s._performanceSampleSource.empty()?(s._sine?"sine":"piano"):"sample";result.source=s._performanceSampleSource;result.root=s._performanceSampleRoot;result.gain=s._previewGain;result.attack=attack;result.release=release;return result;},
+            s._recordingSaved,[this]{s.releaseKeys();});
+        auto* parameterToggle=row(performance,28);
+        auto* showParameters=new ayt::ui::CheckBox();showParameters->setId("performance_parameters_toggle");showParameters->setText(L"显示音源与演奏参数");parameterToggle->addWidget(showParameters);
+        auto* parameters=new VBox();parameters->setSpacing(4);performance->addWidget(parameters);parameters->setVisible(false);
+        showParameters->setOnToggled([this,parameters](bool value){parameters->setVisible(value);s._ui->invalidateLayout();s._ui->layout();});
+        auto *p = row(parameters);
         p->addWidget(label(L"演奏参数"), 78);
         auto *preset = new Combo();
         preset->setId("instrument_preset");
@@ -733,8 +747,8 @@ struct AudioEditorSession::Workbench
         auto *save = button(p, L"保存预设（待实现）", "instrument_preset_save", [] {}, 190);
         save->setEnabled(false);
         instrument = label(L"Salamander Grand Piano", "lbl_instrument");
-        performance->addWidget(instrument, 28);
-        auto *source = row(performance);
+        parameters->addWidget(instrument, 28);
+        auto *source = row(parameters);
         button(
             source, L"钢琴 / 正弦波", "btn_instrument",
             [this] {
@@ -746,15 +760,15 @@ struct AudioEditorSession::Workbench
         button(source, L"导入采样…", "btn_load_sample", [this] { s.loadSample(); }, 120);
         source->addWidget(label(L"C1–C7 根音采样 · 实际音域按采样映射"));
         addGain(
-            performance, L"演奏音量", "preview", 0, 100, 70, [this] { return s._previewGain; },
+            parameters, L"演奏音量", "preview", 0, 100, 70, [this] { return s._previewGain; },
             [this](float v) {
                 s._previewGain = v;
                 applyInstrument();
             });
         addGain(
-            performance, L"音符力度", "velocity", 1, 100, 80, [this] { return s._velocity; },
+            parameters, L"音符力度", "velocity", 1, 100, 80, [this] { return s._velocity; },
             [this](float v) { s._velocity = v; });
-        auto *envelope = row(performance);
+        auto *envelope = row(parameters);
         envelope->addWidget(label(L"起音 / 释放"), 140);
         envelopeFields =
             new ayt::ui::authoring::NumericFields({"instrument_attack", "instrument_release"}, {L"起音", L"释放"});
@@ -772,14 +786,14 @@ struct AudioEditorSession::Workbench
                 envelopeFields->setValues({attack * 1000, release * 1000});
         });
         envelope->addWidget(envelopeFields);
-        auto *routing = row(performance);
+        auto *routing = row(parameters);
         routing->addWidget(label(L"演奏输出到"), 140);
         instrumentBus = route(routing, "instrument_bus", [this](int) {
             s.releaseKeys();
             applyInstrument();
         });
         routing->addWidget(label(L"所选分组 → 总输出"));
-        auto *toolbar = row(performance, 36);
+        auto *toolbar = row(pianoPane, 36);
         button(
             toolbar, L"音域 −", "btn_octave_down",
             [this] {
@@ -822,7 +836,7 @@ struct AudioEditorSession::Workbench
         };
         transpose->setOnSubmit([commitShift](const std::wstring &) { commitShift(); });
         transpose->setOnFocusLostNotify(commitShift);
-        auto *keys = row(performance, 34);
+        auto *keys = row(pianoPane, 34);
         keyboardEnabled = new ayt::ui::CheckBox();
         keyboardEnabled->setId("keyboard_enabled");
         keyboardEnabled->setText(L"电脑键盘演奏");
@@ -836,13 +850,13 @@ struct AudioEditorSession::Workbench
                     return;
                 s._pedalLatch = !s._pedalLatch;
                 s._instrument->setSustain(s._spaceDown || s._pedalLatch);
+                if(this->performance)this->performance->sustain(s._spaceDown || s._pedalLatch);
                 s.updateKeys();
             },
             110);
         button(keys, L"释放全部音符", "btn_stop_all", [this] { s.releaseKeys(); }, 140);
         keys->addWidget(label(L"Space：延音"));
-        performance->addWidget(label(L"左 Shift：临时升一个八度  |  左 Alt：临时降一个八度  |  同时按住：抵消"), 24);
-        performance->addWidget(label(L"下排 Z X C V B N M ,：低八度白键（C 到 C）"), 24);
+        pianoPane->addWidget(label(L"Shift：升八度 · Alt：降八度 · Z X C V B N M ,：低八度白键 · Space：延音"), 20);
         piano = new Piano();
         piano->setId("piano_keyboard");
         piano->onNote = [this](int n, bool down) {
@@ -850,9 +864,9 @@ struct AudioEditorSession::Workbench
             else if (s._mouseKey>=0) { const int pitch=s._mouseKey;s._mouseKey=-1;s.pressPitch(pitch,false,false); }
         };
         piano->isDown = [this](int n) { return n >= 0 && n < 128 && (s._keyboard[n] || s._mouse[n]); };
-        performance->addWidget(piano, 160);
+        pianoPane->addWidget(piano, 160);
         noteStatus = label(L"A W S E D F T G Y H U J K · 缩放和平移保持音高", "note_status");
-        performance->addWidget(noteStatus, 28);
+        pianoPane->addWidget(noteStatus, 22);
         auto *resources = new VBox();
         resources->setPadding(12, 14, 12, 8);
         resources->setSpacing(4);
@@ -1059,6 +1073,7 @@ struct AudioEditorSession::Workbench
         recorder.stop();
         recorder.stopPlayback();
         releaseAudio();
+        performance.reset();
         if (host && root)
         {
             host->removeChild(root);
@@ -1099,6 +1114,7 @@ struct AudioEditorSession::Workbench
     void releaseAudio()
     {
         if(chart) chart->release();
+        if(performance) performance->release();
         stopResource();
         if (resourceValid() && resourceClip)
             s.liveEngine()->releaseClip(resourceClip);
@@ -1337,6 +1353,7 @@ struct AudioEditorSession::Workbench
     {
         if(chart) chart->tick();
         if(!s._chartPreviewFile.empty()) return;
+        if(performance) performance->tick();
         tickRecording();
         updating = true;
         for (auto &g : gains)

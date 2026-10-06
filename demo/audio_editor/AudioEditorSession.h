@@ -23,6 +23,7 @@ class TextLabel;
 
 namespace ayt::audio {
 
+namespace performance { struct EditState; struct Instrument; }
 class AudioRecorder;
 class AudioEditorSession {
 public:
@@ -62,6 +63,14 @@ public:
     bool openResource(const std::string& path);
     // Authoring host integration; chart preview is configured before attach.
     bool openChart(const std::string& path);
+    bool openPerformance(const std::string& path);
+    performance::EditState* performanceState() const;
+    bool performanceRecording() const;
+    // Input-boundary monotonic clock, injectable for deterministic authoring tests.
+    void setPerformanceClock(std::function<double()> clock) { _performanceClock=std::move(clock); }
+    double performanceTime() const;
+    uint32_t uiModifiers() const;
+    const std::string& builtinAudioAssets() const { return _assetRoot; }
     void setChartPreviewFile(std::string path) { _chartPreviewFile=std::move(path); }
     using ChartLauncher=std::function<bool(const std::string&,std::string&)>;
     void setChartLauncher(ChartLauncher launcher) { _chartLauncher=std::move(launcher); }
@@ -129,6 +138,9 @@ private:
 
     ayt::ui::UIManager* _ui = nullptr;
     AudioSubSystem* _audio = nullptr;
+    std::function<double()> _performanceClock;
+    std::string _performanceSampleSource;
+    int _performanceSampleRoot=60;
     PathPicker _pathPicker, _recordingFolderPicker;
     std::string _chartPreviewFile;
     ChartLauncher _chartLauncher;

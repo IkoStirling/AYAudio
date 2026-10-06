@@ -1,5 +1,8 @@
 #include "AudioEditorSession.h"
 #include "ChartDocument.h"
+#include "PerformanceRenderer.h"
+#include <future>
+#include <atomic>
 #ifdef _WIN32
 #include <Windows.h>
 #endif
@@ -574,10 +577,12 @@ void AudioEditorSession::stopOwned() {
     _ownedVoices.clear(); _loopVoice=InvalidVoice; stopStream();
 }
 void AudioEditorSession::buildInstrument(bool sine) {
+    if(_workbench&&_workbench->performance&&_workbench->performance->busy())return;
     auto* e=liveEngine(); if (!e) return;
     releaseKeys(); _instrument.reset();
     for (auto c:_instrumentClips) e->releaseClip(c); _instrumentClips.clear();
     _instrument=std::make_unique<SampleInstrument>(*e,16); _instrument->setGain(_previewGain); _instrument->setPaused(_paused);
+    _performanceSampleSource.clear();
     _sine=sine; _instrumentName=sine ? L"Sine" : L"Piano";
     bool fallback=false;
     for (int octave=1; octave<=7; ++octave) {
@@ -610,6 +615,7 @@ void AudioEditorSession::buildInstrument(bool sine) {
     if (_workbench) {_workbench->piano->low=18;_workbench->piano->high=102;_workbench->applyInstrument();}
 }
 void AudioEditorSession::loadSample() {
+    if(_workbench&&_workbench->performance&&_workbench->performance->busy())return;
     if (!_pathPicker || !ensureClips()) return;
     releaseKeys(); const auto path=_pathPicker(); if (path.empty() || !ensureClips()) return;
     ayt::resource::AudioLoader loader;
@@ -620,6 +626,8 @@ void AudioEditorSession::loadSample() {
     _instrument.reset(); for (auto c:_instrumentClips) e->releaseClip(c); _instrumentClips={clip};
     _instrument=std::make_unique<SampleInstrument>(*e,16); _instrument->setGain(_previewGain); _instrument->setPaused(_paused);
     const int root=(_octave+1)*12; _instrument->addRegion({clip,root,std::max(0,root-12),std::min(127,root+24)});
+    _performanceSampleSource=chart::utf8(std::filesystem::absolute(std::filesystem::path(path)));
+    _performanceSampleRoot=root;
     _instrumentName=L"Sample (root C"+std::to_wstring(_octave)+L")";
     if (_workbench) {_workbench->piano->low=std::max(0,root-12);_workbench->piano->high=std::min(127,root+24);_workbench->applyInstrument();}
     updateKeys();
@@ -633,11 +641,14 @@ void AudioEditorSession::pressPitch(int pitch,bool keyboard,bool down) {
     const bool before=_keyboard[pitch] || _mouse[pitch];
     (keyboard ? _keyboard[pitch] : _mouse[pitch])=down;
     const bool after=_keyboard[pitch] || _mouse[pitch];
+    const double eventTime=performanceTime();
     if (!before && after && !_instrument->noteOn(pitch,_velocity)) {
         (keyboard ? _keyboard[pitch] : _mouse[pitch])=false;
         setStatus(L"音符不可用：超出音源范围或声部容量");
     }
     if (before && !after) _instrument->noteOff(pitch);
+    if (_workbench && _workbench->performance && before!=(_keyboard[pitch]||_mouse[pitch]))
+        _workbench->performance->note(pitch,_keyboard[pitch]||_mouse[pitch],_velocity,eventTime);
     updateKeys();
     if (_workbench) _workbench->noteStatus->setText(L"实际音高："+workbench::noteName(pitch));
 }
@@ -669,7 +680,7 @@ bool AudioEditorSession::handleKey(int key, bool pressed) {
         return true;
     }
     if (pressed && (editing || (_ui && ((_ui->getModifiers() & 2u) || ((_ui->getModifiers() & 4u) && !_leftAlt))))) return false;
-    if (key==32) { if (!ensureClips()) return false;_spaceDown=pressed;if (_instrument) _instrument->setSustain(pressed||_pedalLatch);updateKeys();return true; }
+    if (key==32) { if (!ensureClips()) return false;_spaceDown=pressed;if (_instrument) _instrument->setSustain(pressed||_pedalLatch);if(_workbench->performance)_workbench->performance->sustain(pressed||_pedalLatch);updateKeys();return true; }
     const int offset = workbench::keyboardOffset(key);
     if (offset == 128 || !pressed) return false;
     if (_keyPitches[key] >= 0) return true; // native auto-repeat must not create another voice
@@ -695,9 +706,15 @@ bool AudioEditorSession::handleMouseMove(float x,float y) {
 void AudioEditorSession::onFocusLost() {
     releaseKeys();
     if (_workbench && _workbench->chart) _workbench->chart->focusLost();
+    if (_workbench && _workbench->performance) _workbench->performance->focusLost();
     if (_ui) {_ui->cancelCapture();_ui->onKeyUp(16);_ui->onKeyUp(17);_ui->onKeyUp(18);}
 }
 AudioRecorder* AudioEditorSession::recorder() const {return _workbench?&_workbench->recorder:nullptr;}
+double AudioEditorSession::performanceTime() const {return _performanceClock?_performanceClock():std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();}
+uint32_t AudioEditorSession::uiModifiers() const {return _ui?_ui->getModifiers():0;}
+performance::EditState* AudioEditorSession::performanceState() const {return _workbench&&_workbench->performance?&_workbench->performance->state:nullptr;}
+bool AudioEditorSession::performanceRecording() const {return _workbench&&_workbench->performance&&_workbench->performance->recording;}
+bool AudioEditorSession::openPerformance(const std::string& path) {return _workbench&&_workbench->performance&&_workbench->performance->loadFile(std::filesystem::u8path(path));}
 
 bool AudioEditorSession::openChart(const std::string& path) {return _workbench && _workbench->chart && _workbench->chart->loadFile(std::filesystem::u8path(path));}
 
@@ -705,6 +722,7 @@ bool AudioEditorSession::openResource(const std::string& path) {return _workbenc
 ayt::math::FRectangle AudioEditorSession::pianoKeyBounds(int note) const {return _workbench&&_workbench->piano?_workbench->piano->keyBounds(note):ayt::math::FRectangle{};}
 
 void AudioEditorSession::releaseKeys() {
+    if (_workbench && _workbench->performance) _workbench->performance->releaseNotes();
     if (_workbench && _workbench->piano) _workbench->piano->cancel();
     _keyboard.fill(false); _mouse.fill(false); _mouseKey=-1; _spaceDown=false; _pedalLatch=false;
     _keyPitches.fill(-1); _leftShift=false; _leftAlt=false;
