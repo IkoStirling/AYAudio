@@ -105,7 +105,7 @@ struct Document {
         }d.validate();return d;
     }
     Clip& duplicate(uint64_t id,uint64_t trackId,Tick position){auto* old=clip(id);auto* dest=track(trackId);if(!old||!dest)throw std::runtime_error("choose a clip and track");Clip copy=*old;copy.id=allocate();copy.position=position;copy.name+=" 副本";for(auto& n:copy.notes)n.id=allocate();dest->clips.push_back(std::move(copy));return dest->clips.back();}
-    void quantize(uint64_t id,int division,bool ends){auto* c=clip(id);if(!c)return;for(auto& n:c->notes){n.start=snap(ticks(n.rawStart),division);const Tick duration=std::max<Tick>(1,ticks(n.rawDuration));n.duration=ends?std::max<Tick>(PPQ/8,snap(ticks(n.rawStart+n.rawDuration),division)-n.start):duration;c->sourceLength=std::max(c->sourceLength,n.start+n.duration);}c->length=std::max(c->length,c->sourceLength-c->offset);}
+    void quantize(uint64_t id,int division,bool ends){auto* c=clip(id);if(!c)return;for(auto& n:c->notes){n.start=snap(ticks(n.rawStart),division);const Tick duration=std::max<Tick>(1,ticks(n.rawDuration));n.duration=ends?std::max<Tick>(PPQ/std::clamp(division,1,8),snap(ticks(n.rawStart+n.rawDuration),division)-n.start):duration;c->sourceLength=std::max(c->sourceLength,n.start+n.duration);}c->length=std::max(c->length,c->sourceLength-c->offset);}
 };
 struct EditState {Document document;Tick cursor=0;uint64_t track=0,clip=0;bool operator==(const EditState&)const=default;};
 struct History {
@@ -121,7 +121,7 @@ struct Take {
     void begin(Document& d,const Instrument& instrument,Tick position,int grid,bool ends,bool sustain=false){clip={};clip.id=d.allocate();clip.instrument=instrument;clip.position=position;clip.name="录制片段";clip.notes.clear();clip.pedals.clear();bpm=d.bpm;division=grid;snapEnds=ends;held.fill(-1);pedal=sustain;if(pedal)clip.pedals.push_back({0,true});}
     void note(Document& d,int pitch,bool down,double seconds,float velocity){if(pitch<0||pitch>127||!std::isfinite(seconds)||seconds<0)return;const double raw=seconds*bpm/60;const Tick at=ticks(raw);
         if(down){if(held[pitch]>=0)return;Note n;n.id=d.allocate();n.pitch=pitch;n.start=snap(at,division);n.duration=1;n.velocity=velocity;n.rawStart=raw;n.rawDuration=1.0/PPQ;held[pitch]=int(clip.notes.size());clip.notes.push_back(n);}
-        else if(held[pitch]>=0){auto& n=clip.notes[held[pitch]];n.rawDuration=std::max(1.0/PPQ,raw-n.rawStart);n.duration=snapEnds?std::max<Tick>(PPQ/8,snap(at,division)-n.start):std::max<Tick>(1,ticks(n.rawDuration));held[pitch]=-1;}
+        else if(held[pitch]>=0){auto& n=clip.notes[held[pitch]];n.rawDuration=std::max(1.0/PPQ,raw-n.rawStart);n.duration=snapEnds?std::max<Tick>(PPQ/std::clamp(division,1,8),snap(at,division)-n.start):std::max<Tick>(1,ticks(n.rawDuration));held[pitch]=-1;}
     }
     void sustain(bool down,double seconds){if(down==pedal||seconds<0)return;pedal=down;clip.pedals.push_back({ticks(seconds*bpm/60),down});}
     void finish(Document& d,double seconds){for(int p=0;p<128;++p)if(held[p]>=0)note(d,p,false,seconds,1);if(pedal)sustain(false,seconds);Tick end=ticks(std::max(0.0,seconds)*bpm/60);for(const auto& n:clip.notes)end=std::max(end,n.start+n.duration);for(const auto& p:clip.pedals)end=std::max(end,p.time);const Tick grid=PPQ/std::clamp(division,1,8);clip.sourceLength=clip.length=std::max(grid,((end+grid-1)/grid)*grid);}

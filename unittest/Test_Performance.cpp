@@ -71,4 +71,17 @@ TEST_CASE(SustainTailAndRangeExportShareExactPCMAndExcludeMetronome){
     Document silent;silent.addTrack();o.tail=false;o.begin=-4;o.end=0;auto noClick=render(silent,o);CHECK(noClick.peak==0);o.metronome=true;const auto clicks=render(silent,o);CHECK(clicks.peak>0);
     o.cancel=std::make_shared<std::atomic<bool>>(true);bool rejected=false;try{render(d,o);}catch(...){rejected=true;}CHECK(rejected);
 }
+
+TEST_CASE(EndSnapRoundsToSelectedGridAndShortNotesRemainOneWholeGridCell){
+    for(int division:{1,2,4,8}){
+        Document d;Take take;take.begin(d,{},0,division,true);const double cell=1.0/division;
+        take.note(d,60,true,cell*.2*60/d.bpm,.8f);take.note(d,60,false,cell*.4*60/d.bpm,1);
+        take.note(d,64,true,cell*1.6*60/d.bpm,.8f);take.note(d,64,false,cell*3.51*60/d.bpm,1);take.finish(d,cell*4*60/d.bpm);
+        const Tick grid=PPQ/division;
+        CHECK(take.clip.notes[0].start==0);CHECK(take.clip.notes[0].duration==grid);
+        CHECK(take.clip.notes[1].start==2*grid);CHECK(take.clip.notes[1].start+take.clip.notes[1].duration==4*grid);
+        d.addTrack().clips.push_back(take.clip);d.quantize(take.clip.id,division,true);
+        for(const auto& n:d.clip(take.clip.id)->notes){CHECK(n.start%grid==0);CHECK((n.start+n.duration)%grid==0);CHECK(n.duration>=grid);}
+    }
+}
 TEST_SUITE_END

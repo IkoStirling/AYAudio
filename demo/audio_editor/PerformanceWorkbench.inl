@@ -7,10 +7,33 @@ public:
     std::function<std::string()> assets,folder;std::function<performance::Instrument()> instrument;
     std::function<void(const std::string&)> saved;std::function<void()> releaseInput;
     PerformanceCanvas *timeline=nullptr,*roll=nullptr;
+    ScrollView* scroll=nullptr;
+    Widget* wheelOwner=nullptr;
+    ayt::math::FVector2 wheelAnchor{};
+    double lastWheel=-1;
+    // Win32 wheel events have no begin/end phase. An idle gap ends a burst;
+    // within one burst crossing a canvas never changes scroll into zoom.
+    void resetWheel(){wheelOwner=nullptr;lastWheel=-1;}
+    bool wheel(ayt::math::FVector2 pos,float delta,Widget* hit){
+        if(!scroll||!std::isfinite(delta)||delta==0)return false;
+        const double time=now();
+        if(!wheelOwner||lastWheel<0||time-lastWheel>.3||time<lastWheel){
+            resetWheel();
+            for(auto* w=hit;w;w=w->getParent()){
+                if(w==timeline||w==roll){wheelOwner=w;break;}
+                if(w==scroll){wheelOwner=scroll;break;}
+            }
+            if(!wheelOwner)return false;
+            wheelAnchor=pos;
+        }
+        lastWheel=time;
+        wheelOwner->onMouseWheel({wheelOwner==scroll?pos:wheelAnchor,delta});
+        return true;
+    }
     TextLabel* status=nullptr;TextInput *bpm=nullptr,*cursor=nullptr,*rangeEnd=nullptr,*path=nullptr,*trackName=nullptr,*trackGain=nullptr,*clipName=nullptr;
     TextInput *clipPosition=nullptr,*clipOffset=nullptr,*clipLength=nullptr,*clipRepeats=nullptr,*notePitch=nullptr,*noteStart=nullptr,*noteLength=nullptr,*noteVelocity=nullptr,*master=nullptr;
     ComboBox *mode=nullptr,*grid=nullptr,*length=nullptr,*preroll=nullptr;
-    CheckBox *snapEnds=nullptr,*metronome=nullptr,*mute=nullptr,*solo=nullptr;
+    CheckBox *snapEnds=nullptr,*metronome=nullptr,*monitor=nullptr,*mute=nullptr,*solo=nullptr;
     std::vector<Widget*> editControls;
     bool recording=false,dirty=false,refreshing=false;
     double recordEpoch=0,recordStart=0,recordLimit=0,preBeats=0;
@@ -20,7 +43,7 @@ public:
     AudioEngine* bound=nullptr;uint64_t generation=0;AudioClipId playbackClip=0;VoiceHandle voice=0;
     double playbackBegin=0,restoreCursor=0;bool clipPreview=false;
     std::string rootOverride,documentRoot,baseline,savedFile,exportFile,exportLogical,jobRoot;
-    std::wstring message=L"实时录制吸附起点、保留按键时长；步进录入使用固定时值";
+    std::wstring message=L"实时录制默认吸附起止；关闭结束吸附可保留自由时值";
     bool busy()const{return recording||jobKind!=None||voice!=0;}
     bool valid()const{auto* e=engine();return e&&e==bound&&e->lifecycleGeneration()==generation;}
     double now()const{return session.performanceTime();}
@@ -49,7 +72,7 @@ public:
         auto* settings=row(page,30);settings->addWidget(label(L"BPM"),34);bpm=field(settings,"performance_bpm",L"120",52);
         settings->addWidget(label(L"起点吸附"),62);grid=combo(settings,"performance_grid",{L"1 拍",L"半拍",L"1/4 拍",L"1/8 拍"},2,86);
         settings->addWidget(label(L"步进时值"),62);length=combo(settings,"performance_length",{L"1 拍",L"半拍",L"1/4 拍",L"1/8 拍"},0,86);
-        snapEnds=check(settings,"performance_snap_ends",L"结束吸附",false,92);metronome=check(settings,"performance_metronome",L"节拍器",true,82);
+        snapEnds=check(settings,"performance_snap_ends",L"结束吸附",true,92);metronome=check(settings,"performance_metronome",L"节拍器",true,82);
         preroll=combo(settings,"performance_preroll",{L"无预备拍",L"预备 1 小节",L"预备 2 小节"},2,118);
         auto* timing=row(page,30);timing->addWidget(label(L"光标 / 拍"),70);cursor=field(timing,"performance_cursor",L"0",64);
         timing->addWidget(label(L"录制 / 区间终点"),112);rangeEnd=field(timing,"performance_range_end",L"16",64);
@@ -61,6 +84,9 @@ public:
         auto commitSettings=[this]{if(busy()||refreshing)return;try{const double nextBpm=parse(bpm->getText());const Tick at=performance::ticks(parse(cursor->getText()));const float gain=float(parse(master->getText())/100);if(nextBpm<20||nextBpm>1000||gain<0||gain>2)throw std::runtime_error("settings");if(nextBpm!=state.document.bpm||gain!=state.document.master)modify([&]{state.document.bpm=nextBpm;state.document.master=gain;});state.cursor=at;}catch(...){message=L"检查 BPM、光标和音量数值";}refresh();};
         for(auto* f:{bpm,cursor,master}){f->setOnSubmit([commitSettings](const std::wstring&){commitSettings();});f->setOnFocusLostNotify(commitSettings);}
         grid->setOnSelectionChanged([this](int index){timeline->division=roll->division=1<<index;refresh();});
+        auto* recordOptions=row(page,28);
+        monitor=check(recordOptions,"performance_monitor",L"录制时监听编排",true,160);
+        recordOptions->addWidget(label(L"关闭仅编排监听；现场琴键与节拍器继续发声"));
         auto* navigation=row(page,26);navigation->addWidget(label(L"拖动标尺 / 时间轴空白：左右平移 · 滚轮缩放 · 左侧滚轮切换音域 / 轨道"));
         button(navigation,L"‹","performance_pan_left",[this]{timeline->origin=std::max(0.0,timeline->origin-timeline->visible/2);timeline->markDirty();},30);
         button(navigation,L"›","performance_pan_right",[this]{timeline->origin+=timeline->visible/2;timeline->markDirty();},30);
@@ -87,7 +113,7 @@ public:
         auto* files=row(page,30);const auto stamp=std::chrono::system_clock::now().time_since_epoch().count();path=field(files,"performance_path",L"audio/performances/Take_"+std::to_wstring(stamp)+L".performance.json",0);
         button(files,L"打开","performance_load",[this]{loadAsset();},58);button(files,L"保存","performance_save",[this]{saveAsset();},58);button(files,L"导出 WAV","performance_export",[this]{exportWav();},82);button(files,L"导出区间","performance_export_range",[this]{exportWav(true);},82);button(files,L"目录…","performance_folder",[this]{if(!busy()&&folder){const auto chosen=folder();if(!chosen.empty())rootOverride=chosen;}refresh();},66);
         status=label(message,"performance_status");page->addWidget(status,26);
-        editControls={transport,mode,bpm,cursor,rangeEnd,master,grid,length,snapEnds,metronome,preroll,tracks,clips,notes,files};refresh();
+        editControls={transport,mode,bpm,cursor,rangeEnd,master,grid,length,snapEnds,metronome,monitor,preroll,tracks,clips,notes,files};refresh();
     }
     ~PerformanceDesk(){release();}
     void refresh(){if(!timeline||!roll||!status)return;refreshing=true;
@@ -127,7 +153,7 @@ public:
     void launch(const performance::Document& document,performance::RenderOptions options,Job kind){if(jobKind!=None)return;cancel=std::make_shared<std::atomic<bool>>(false);options.cancel=cancel;options.assets=root();options.builtinAssets=session.builtinAudioAssets();jobRoot=root();jobKind=kind;message=L"正在准备音频…";job=std::async(std::launch::async,[document,options]{return performance::render(document,options);});refresh();}
     void startRecord(){if(busy())return;if(mode->getSelectedIndex()!=0){message=L"步进模式直接演奏即可录入音符";refresh();return;}if(releaseInput)releaseInput();finishGesture();
         try{state.cursor=performance::snap(performance::ticks(parse(cursor->getText())),1<<grid->getSelectedIndex());recordStart=performance::beats(state.cursor);const double end=parse(rangeEnd->getText());if(end<=recordStart||end>20000)throw std::runtime_error("录制终点必须大于光标位置");recordLimit=end-recordStart;preBeats=preroll->getSelectedIndex()*4;recordBefore=state;if(documentRoot.empty())documentRoot=root();take.begin(state.document,instrument(),state.cursor,1<<grid->getSelectedIndex(),snapEnds->isChecked());
-            performance::RenderOptions o;o.begin=recordStart-preBeats;o.end=end;o.tail=false;o.metronome=metronome->isChecked();launch(state.document,o,Recording);
+            performance::RenderOptions o;o.begin=recordStart-preBeats;o.end=end;o.tail=false;o.metronome=metronome->isChecked();auto backing=state.document;if(!monitor->isChecked())backing.tracks.clear();launch(backing,o,Recording);
         }catch(const std::exception& e){message=wide(e.what());refresh();}}
     void play(bool selectedClip,bool range){if(busy())return;if(releaseInput)releaseInput();finishGesture();step.finish(state,history);
         try{auto document=state.document;double begin=performance::beats(state.cursor),end=performance::beats(document.end());if(selectedClip){const auto* c=document.clip(state.clip);if(!c)throw std::runtime_error("先选择一个片段");performance::Track t;t.id=state.track;t.name="试听";t.clips={*c};t.clips[0].position=0;document.tracks={t};begin=0;end=performance::beats(c->length*c->repeats);}
@@ -136,7 +162,7 @@ public:
     void stopVoice(){if(valid()){if(voice)bound->stop(voice);if(playbackClip)bound->releaseClip(playbackClip);}voice=0;playbackClip=0;bound=nullptr;timeline->playhead=roll->playhead=-1;}
     void stop(){if(cancel)cancel->store(true);if(releaseInput)releaseInput();if(recording){releaseNotes();take.finish(state.document,elapsed());recording=false;if(!take.clip.notes.empty()){history.remember(recordBefore);auto* t=state.document.track(state.track);state.clip=take.clip.id;t->clips.push_back(std::move(take.clip));dirty=true;message=L"录制片段已放入轨道";}else{state=recordBefore;message=L"空录制未生成片段";}}else message=L"已停止 · 编辑光标保留";stopVoice();refresh();}
     void release(){if(cancel)cancel->store(true);recording=false;stopVoice();if(job.valid()){try{job.get();}catch(...){}}jobKind=None;}
-    void focusLost(){if(recording||jobKind==Recording)stop();else if(voice)stop();releaseNotes();refresh();}
+    void focusLost(){resetWheel();if(recording||jobKind==Recording)stop();else if(voice)stop();releaseNotes();refresh();}
     void saveAsset(){if(busy())return;try{step.finish(state,history);const auto destination=chart::containedPath(root(),utf8(path->getText()));if(!documentRoot.empty()&&root()!=documentRoot)throw std::runtime_error("项目已切换，请返回原资产目录保存");const auto filename=chart::utf8(destination);if(!filename.ends_with(".performance.json"))throw std::runtime_error("文件名需以 .performance.json 结尾");if(std::filesystem::exists(destination)&&(filename!=savedFile||chart::read(destination)!=baseline))throw std::runtime_error("目标已存在或被外部修改，请使用新文件名");
             auto document=state.document;for(auto& t:document.tracks)for(auto& c:t.clips){auto& i=c.instrument;if(i.kind=="sample"&&!i.relative){const auto base=std::filesystem::weakly_canonical(std::filesystem::u8path(root())),source=std::filesystem::weakly_canonical(std::filesystem::u8path(i.source));const auto rel=source.lexically_relative(base);if(!rel.empty()&&!rel.is_absolute()&&*rel.begin()!=".."){i.source=chart::utf8(rel.generic_string());i.relative=true;chart::containedPath(root(),i.source);}}}
             const auto bytes=document.json().dump(2)+"\n";std::filesystem::create_directories(destination.parent_path());if(!ayt::io::File::atomicWrite(destination.string(),bytes.data(),bytes.size()))throw std::runtime_error("write failed");state.document=std::move(document);baseline=bytes;savedFile=filename;documentRoot=root();dirty=false;message=L"已保存编排";if(saved)saved(utf8(path->getText()));

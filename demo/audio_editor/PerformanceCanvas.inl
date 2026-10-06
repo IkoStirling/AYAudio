@@ -65,7 +65,12 @@ public:
         }else{for(int i=firstTrack;i<int(state->document.tracks.size())&&i<firstTrack+int((b.maxY-b.minY-22)/40)+1;++i){const auto& t=state->document.tracks[i];const float y=b.minY+22+(i-firstTrack)*40;
                 r.drawRect({b.minX,y,left,y+39},t.id==state->track?FVector4{.2f,.3f,.4f,1}:FVector4{.16f,.17f,.2f,1});r.drawText({b.minX+3,y+5,left,y+35},std::filesystem::u8path(t.name).wstring(),11,color("$color.text.primary"));
                 for(const auto& c:t.clips){const float a=x(performance::beats(c.position)),z=x(performance::beats(c.position+c.length*c.repeats));if(z<left||a>b.maxX)continue;r.drawRect({std::max(left,a),y+3,z,y+36},c.id==state->clip?FVector4{.65f,.46f,.14f,1}:FVector4{.14f,.33f,.5f,1});r.drawText({std::max(left,a)+4,y+7,z,y+30},std::filesystem::u8path(c.name).wstring()+L" ×"+std::to_wstring(c.repeats),11,color("$color.text.primary"));for(int k=1;k<c.repeats;++k){const float px=x(performance::beats(c.position+c.length*k));r.drawRect({px,y+3,px+1,y+36},FVector4{.5f,.6f,.7f,1});}}
-            }}
+            }
+            // Separate track rows, with a fixed gutter boundary as well as
+            // the vertical beat grid. Draw last so clips cannot cover them.
+            for(int i=0;i<=int((b.maxY-b.minY-22)/40)+1;++i){const float y=b.minY+22+i*40;r.drawRect({b.minX,y,b.maxX,y+1},FVector4{.36f,.40f,.47f,1});}
+            r.drawRect({left-1,b.minY+22,left,b.maxY},FVector4{.48f,.52f,.60f,1});
+        }
         const double cursor=roll?(state->document.clip(state->clip)?performance::beats(std::max<performance::Tick>(0,state->cursor-state->document.clip(state->clip)->position+state->document.clip(state->clip)->offset)):0):performance::beats(state->cursor);
         for(const auto value:{cursor,playhead})if(value>=origin&&value<=origin+visible){const float px=x(value);r.drawRect({px,b.minY+22,px+1,b.maxY},value==playhead?FVector4{.3f,1,.5f,1}:color("$color.text.primary"));}r.popClip();
     }

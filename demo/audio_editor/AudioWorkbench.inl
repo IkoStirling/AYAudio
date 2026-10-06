@@ -10,11 +10,15 @@ inline FVector4 color(const char *token)
 }
 inline int keyboardOffset(int key)
 {
-    constexpr int upper[] = {'A','W','S','E','D','F','T','G','Y','H','U','J','K'};
+    constexpr int middle[] = {'A','S','D','F','G','H','J','K'};
+    constexpr int upper[] = {'Q','W','E','R','T','Y','U','I'};
     constexpr int lower[] = {'Z','X','C','V','B','N','M',188};
-    constexpr int offsets[] = {-12,-10,-8,-7,-5,-3,-1,0};
-    for (int i=0;i<13;++i) if (key==upper[i]) return i;
-    for (int i=0;i<8;++i) if (key==lower[i]) return offsets[i];
+    constexpr int offsets[] = {0,2,4,5,7,9,11,12};
+    for (int i=0;i<8;++i) {
+        if (key==middle[i]) return offsets[i];
+        if (key==upper[i]) return offsets[i]+12;
+        if (key==lower[i]) return offsets[i]-12;
+    }
     return 128;
 }
 inline bool black(int n)
@@ -259,12 +263,11 @@ class Piano final : public LeafWidget
                     if (width >= 34)
                     {
                         const int index = n - (octave + 1) * 12;
-                        static const wchar_t *shortcuts[] = {L"A", L"W", L"S", L"E", L"D", L"F", L"T",
-                                                             L"G", L"Y", L"H", L"U", L"J", L"K"};
-                        std::wstring shortcut=index>=0&&index<13?shortcuts[index]:L"";
-                        constexpr int lowerOffsets[]={-12,-10,-8,-7,-5,-3,-1,0};
-                        constexpr const wchar_t* lowerNames[]={L"Z",L"X",L"C",L"V",L"B",L"N",L"M",L","};
-                        for(int i=0;i<8;++i) if(index==lowerOffsets[i]) shortcut+=(shortcut.empty()?L"":L"/")+std::wstring(lowerNames[i]);
+                        constexpr int offsets[]={0,2,4,5,7,9,11,12};
+                        constexpr const wchar_t* names[3][8]={{L"Z",L"X",L"C",L"V",L"B",L"N",L"M",L","},{L"A",L"S",L"D",L"F",L"G",L"H",L"J",L"K"},{L"Q",L"W",L"E",L"R",L"T",L"Y",L"U",L"I"}};
+                        std::wstring shortcut;
+                        for(int row=0;row<3;++row)for(int i=0;i<8;++i)if(index==offsets[i]+(row-1)*12)
+                            shortcut+=(shortcut.empty()?L"":L"/")+std::wstring(names[row][i]);
                         const auto ink=black(n)?FVector4{.95f,.96f,.98f,1}:FVector4{.1f,.12f,.15f,1};
                         renderer.drawText({k.minX+3,k.maxY-38,k.maxX,k.maxY-20},noteName(n+transpose),11,ink);
                         renderer.drawText({k.minX+3,k.maxY-20,k.maxX,k.maxY-4},shortcut,11,ink);
@@ -716,7 +719,7 @@ struct AudioEditorSession::Workbench
         performance->setPadding(12, 14, 12, 8);
         performance->setSpacing(4);
         auto* performancePage=new VBox();performancePage->setSpacing(6);
-        auto* performanceScroll=new ayt::ui::ScrollView();performanceScroll->setHorizontalScrollBarEnabled(false);performanceScroll->setContentOwned(performance);
+        auto* performanceScroll=new ayt::ui::ScrollView();performanceScroll->setId("performance_scroll");performanceScroll->setHorizontalScrollBarEnabled(false);performanceScroll->setContentOwned(performance);
         performancePage->addWidget(performanceScroll);
         auto* pianoPane=new VBox();pianoPane->setPadding(12,4,12,4);pianoPane->setSpacing(3);performancePage->addWidget(pianoPane,284);
         tabs->addTabOwned(L"演奏与编排",performancePage);
@@ -724,6 +727,7 @@ struct AudioEditorSession::Workbench
             [this]{return s.liveEngine();},[this]{return recordingRoot();},s._recordingFolderPicker,
             [this]{performance::Instrument result;result.kind=s._performanceSampleSource.empty()?(s._sine?"sine":"piano"):"sample";result.source=s._performanceSampleSource;result.root=s._performanceSampleRoot;result.gain=s._previewGain;result.attack=attack;result.release=release;return result;},
             s._recordingSaved,[this]{s.releaseKeys();});
+        this->performance->scroll=performanceScroll;
         auto* parameterToggle=row(performance,28);
         auto* showParameters=new ayt::ui::CheckBox();showParameters->setId("performance_parameters_toggle");showParameters->setText(L"显示音源与演奏参数");parameterToggle->addWidget(showParameters);
         auto* parameters=new VBox();parameters->setSpacing(4);performance->addWidget(parameters);parameters->setVisible(false);
@@ -856,7 +860,7 @@ struct AudioEditorSession::Workbench
             110);
         button(keys, L"释放全部音符", "btn_stop_all", [this] { s.releaseKeys(); }, 140);
         keys->addWidget(label(L"Space：延音"));
-        pianoPane->addWidget(label(L"Shift：升八度 · Alt：降八度 · Z X C V B N M ,：低八度白键 · Space：延音"), 20);
+        pianoPane->addWidget(label(L"Alt：升半音 · Q–I：高八度 · A–K：中音 · Z–,：低八度 · Shift：升八度 · Space：延音"), 20);
         piano = new Piano();
         piano->setId("piano_keyboard");
         piano->onNote = [this](int n, bool down) {
@@ -865,7 +869,7 @@ struct AudioEditorSession::Workbench
         };
         piano->isDown = [this](int n) { return n >= 0 && n < 128 && (s._keyboard[n] || s._mouse[n]); };
         pianoPane->addWidget(piano, 160);
-        noteStatus = label(L"A W S E D F T G Y H U J K · 缩放和平移保持音高", "note_status");
+        noteStatus = label(L"Q W E R T Y U I / A S D F G H J K / Z X C V B N M , · Alt 升半音", "note_status");
         pianoPane->addWidget(noteStatus, 22);
         auto *resources = new VBox();
         resources->setPadding(12, 14, 12, 8);

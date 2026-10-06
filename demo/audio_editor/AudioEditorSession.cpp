@@ -656,7 +656,7 @@ void AudioEditorSession::pressNote(int index,bool keyboard,bool down) {
     if (index>=0 && index<13) pressPitch((_octave+1)*12+index+(_workbench?_workbench->shift:0),keyboard,down);
 }
 int AudioEditorSession::effectiveTranspose() const {
-    return (_workbench ? _workbench->shift : 0) + (_leftShift ? 12 : 0) - (_leftAlt ? 12 : 0);
+    return (_workbench ? _workbench->shift : 0) + (_leftShift ? 12 : 0) + (_leftAlt ? 1 : 0);
 }
 bool AudioEditorSession::handleKey(int key, bool pressed) {
     if (_workbench && _workbench->chart && !_chartPreviewFile.empty()) return _workbench->chart->key(key,pressed);
@@ -702,6 +702,11 @@ bool AudioEditorSession::handleMouseButton(float x,float y,int button,bool press
 }
 bool AudioEditorSession::handleMouseMove(float x,float y) {
     return _workbench && _workbench->piano && _workbench->piano->onMouseMove({{x,y}});
+}
+bool AudioEditorSession::handleMouseWheel(float x,float y,float deltaY) {
+    if (!_ui || !_workbench || !_workbench->performance) return false;
+    if (_workbench->tabs->getSelectedIndex()!=0) {_workbench->performance->resetWheel();return false;}
+    return _workbench->performance->wheel({x,y},deltaY,_ui->pickTopmostWidget({x,y}));
 }
 void AudioEditorSession::onFocusLost() {
     releaseKeys();

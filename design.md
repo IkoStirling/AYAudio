@@ -573,7 +573,7 @@ including a different primary UIManager being active and repeated attachment.
 ### Performance shortcuts and compact telemetry (2026-10-04)
 
 Physical keyboard gates latch actual note-on MIDI pitches in a 256-entry table.
-Left Shift/Alt temporary offsets are +12/-12 semitones (one octave), compose additively and
+Left Shift/Alt offsets are +12/+1 semitones as of 2026-10-06, compose additively and
 affect new presses; key-up uses the latched pitch even if modifiers/focus have
 changed. Auto-repeat does not create voices. Multiple physical bindings for
 one pitch share the keyboard gate, so releasing upper A cannot stop lower
@@ -695,7 +695,7 @@ Internal `demo/audio_editor/PerformanceDocument.h` models Document/Track/Clip/No
 96000 integer ticks per beat and separate raw timing. Each clip snapshots an instrument (piano,
 sine, imported sample; root/gain/attack/release). Placement, source trim and loop count are independent.
 History snapshots document plus selected track/clip and cursor; chords are one step transaction.
-Take uses event-boundary monotonic elapsed time, snaps heads, and preserves actual gate duration.
+Take uses event-boundary monotonic elapsed time and preserves raw gate duration. The workbench defaults to snapping both endpoints to the nearest selected grid cell (minimum one cell); end snap can be disabled.
 Stop completes held notes/pedal and rounds the clip boundary upwards without stretching note duration.
 
 PerformanceRenderer reads an immutable copy on std::async; UI never schedules individual playback
@@ -715,3 +715,10 @@ Saved v1 documents use schema ay.audio.performance; IDs are unique, numeric posi
 Canonical Assets paths and file baselines gate atomic saves; references under Assets are relative UTF-8.
 WAV targets use unique timestamp suffixes; project changes while preparing reject publication.
 No new gameplay capability/cook/loader is introduced. Full behavior and limits: AUDIO-AUTHORING §8.
+
+Continuous wheel input is routed by AudioEditorSession/PerformanceDesk before the normal UI wheel bubble.
+The first event selects authoring ScrollView or a canvas; that owner and zoom anchor remain fixed for
+the burst, ending after a 300ms idle gap or focus loss. No input phase is available from Win32 wheel.
+Both native hosts forward the same logical-coordinate hook. Track rows/gutter draw separators after clips.
+Record-backing monitor defaults on for overdubbing; disabling it renders an empty backing document
+with the original BPM/range/metronome, without modifying saved tracks or live instrument output.

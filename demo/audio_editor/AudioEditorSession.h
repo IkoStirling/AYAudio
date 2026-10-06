@@ -59,6 +59,8 @@ public:
     bool handleKey(int key, bool pressed);
     bool handleMouseButton(float x, float y, int button, bool pressed);
     bool handleMouseMove(float x, float y);
+    // Logical coordinates; continuous wheel input keeps its starting surface.
+    bool handleMouseWheel(float x, float y, float deltaY);
     void onFocusLost();
     bool openResource(const std::string& path);
     // Authoring host integration; chart preview is configured before attach.

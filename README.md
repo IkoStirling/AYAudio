@@ -112,9 +112,9 @@ already cached an empty mount panel. Tab changes also recalculate immediately;
 no window resize or per-frame layout call is required. The EditorAudioTests
 suite covers native/standalone load order, reattachment and tab switching.
 
-Performance shortcuts: Left Shift temporarily adds one octave (12 semitones); Left Alt
-subtracts one octave, and holding both cancels. Z X C V B N M comma play the white
-keys C..C one octave below the main row. Temporary offsets add to fixed
+Performance shortcuts: Left Shift adds one octave; Left Alt adds one semitone (C→C#, E→F).
+Their offsets add when held together. A S D F G H J K are the base C..C white keys;
+Q W E R T Y U I are the octave-above white keys; Z X C V B N M comma are the octave below. Temporary offsets add to fixed
 transpose on note-on; held notes retain their original pitch until release.
 Focus loss clears the temporary state. Right modifiers and text editing do not
 trigger these shortcuts. The meter occupies 150 x 80 logical pixels in the
@@ -177,7 +177,7 @@ and `AudioChartTests` / `EditorAudioChartTests` for focused regressions.
 ## Performance clips and arrangement (2026-10-06)
 
 The first tab is now 演奏与编排: a scrollable clip timeline/piano roll with a pinned piano strip.
-Real-time takes quantize heads, retain physical duration and sustain; step chords use selected
+Real-time takes retain raw timing/sustain and default to nearest-grid head/end snapping (minimum one cell); disabling end snap preserves physical duration. Step chords use selected
 1/half/quarter/eighth-beat duration and restore the cursor with undo/redo. Direct track headers
 replace track dropdown selection; drag the ruler/blank timeline or middle-drag to pan, wheel to zoom.
 Clips support independent copy, cross-track move, non-destructive trim and repeats. Track mute,

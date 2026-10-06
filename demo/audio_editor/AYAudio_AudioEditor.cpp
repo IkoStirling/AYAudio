@@ -250,7 +250,9 @@ std::intptr_t handleMessage(AppState *state, unsigned msg, std::uintptr_t wParam
                 ::ScreenToClient(hwnd, &pt);
             }
         }
-        ui.onMouseWheel(static_cast<float>(pt.x), static_cast<float>(pt.y), deltaY);
+        const auto logical=ui.physicalToLogical({static_cast<float>(pt.x),static_cast<float>(pt.y)});
+        if (!state->session || !state->session->handleMouseWheel(logical.x,logical.y,deltaY))
+            ui.onMouseWheel(static_cast<float>(pt.x), static_cast<float>(pt.y), deltaY);
         handled = true;
         return 0;
     }
