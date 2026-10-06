@@ -728,14 +728,25 @@ with the original BPM/range/metronome, without modifying saved tracks or live in
 
 ## Rhythm assistance and horizontal chart preview (2026-10-06)
 
-AudioRhythmAnalysis.h is reusable internal authoring support, independent of AYUI/Host. It builds
-a 5ms energy/attack novelty envelope, locally thresholds onset peaks (including an energy-relative
-floor), and estimates normalized lag correlation plus circular onset-phase agreement to reduce
-half-tempo aliases. Weighted regression refines tempo; weighted phase estimates a beat candidate.
-This does not identify semantic bar downbeats or variable tempo. Detection needs ≥6 peaks and
-confidence ≥0.32 to apply; manual fields/half/double/offset remain authoritative. No third-party
-analysis code/model or license dependency is added. Onsets drive density-filtered, beat-snapped
-four-lane taps; explicit generation records one undo step, retains original audio and is editable.
+AudioRhythmAnalysis.h is reusable internal authoring support, independent of AYUI/Host. It samples
+at 11025Hz with centered 512-sample Hann windows and 110-sample hops (~10ms). Per-channel FFT
+powers are averaged after transformation, so opposite polarity cannot cancel. Positive differences
+in 32 logarithmic frequency bands are adaptively whitened, locally thresholded by median/MAD,
+and peak-picked with a 90ms refractory interval and silence gate. The 90th-percentile attack strength
+scale prevents one loud opening from hiding later attacks. Tempo uses normalized residual-flux
+correlation and fundamental/half-beat phase evidence; this prevents accompaniment subdivisions
+from cancelling tempo evidence. A coherent opening refines the BPM/phase candidate; correlation is
+an uncalibrated periodicity score, not recognition probability. This is still fixed-tempo estimation,
+not semantic bar downbeats or a variable-tempo map. No analysis dependency/model was added.
+
+Draft density applies strength thresholds 1/.55/.3 (relative to the percentile scale) and minimum
+spacing .8/.42/.2 beats. Strength-ordered suppression retains the stronger nearby attack; it never
+fills vacant grid cells. Default note timestamps equal detected attacks; optional nearest-cell snap
+only moves points ≤25ms. Low-frequency positive flux below roughly 550Hz selects the left lane
+pair, higher flux the right pair, with alternation within a pair. This coarse spectral mapping is not
+source separation, pitch transcription or musical phrasing. Generation is one reversible replacement.
+Yellow waveform ticks show attacks; grid fit is the fraction of strength ≥.55 attacks within ±35ms
+of the current half-beat grid. Tempo drift can lower this fit without invalidating original attacks.
 
 ChartDesk owns cancel/join futures. Workers decode/sample/analyze/normalize immutable inputs;
 main-thread poll validates duration/project and registers PCM against the current engine generation.
@@ -764,3 +775,9 @@ Due-note and lane indexes are sorted once at reset; update visits due notes plus
 binary-searches the next six seconds. Grade counts/accuracy aggregates are maintained incrementally.
 The percentage is a transparent timing metric, not a probability or formal game scoring standard.
 Existing v1 authoring format stays compatible and no public gameplay capability is introduced.
+
+Standalone WM_CLOSE hides the native surface immediately, retains the HWND for GPU teardown and
+stops the event/render loop before another frame. Session jobs are cancelled/joined and owned voices
+released, audio stops before renderer disposal, then UI/GPU/window cleanup completes. Preview-only
+local Exit_<pid>.log records stage durations under OS Temp/AYAudioChartPreview; it contains no song
+paths or chart content. No force exit, detached jobs or shared-engine shutdown in the editor child.

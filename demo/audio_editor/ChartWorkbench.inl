@@ -101,6 +101,7 @@ public:
     chart::Document document;chart::History history;chart::Judge judge;
     VBox* page=nullptr;Waveform* wave=nullptr;ChartCanvas* canvas=nullptr;
     TextLabel *status=nullptr,*audioName=nullptr,*positionLabel=nullptr,*feedbackLabel=nullptr;
+    CheckBox *nearbyDraftSnap=nullptr,*showOnsets=nullptr;TextLabel* rhythmReport=nullptr;
     CheckBox* follow=nullptr;ComboBox* draftDensity=nullptr,*leadInChoice=nullptr;
     double leadIn=.5;std::array<TextLabel*,8> feedbackLines{};
     TextInput *bpm=nullptr,*offset=nullptr,*path=nullptr,*startInput=nullptr,*endInput=nullptr;
@@ -142,16 +143,21 @@ public:
             button(timing,L"此处设为第1拍","chart_beat_zero",[this]{changeTiming(document.bpm,wave->position);},125);
             button(timing,L"重新识别节奏","chart_analyze",[this]{if(!source.empty())requestMusic(source);},110);
             auto* draft=row(page,30);draft->addWidget(label(L"节奏草稿密度"),100);
-            draftDensity=new ComboBox();draftDensity->setId("chart_draft_density");draftDensity->setItems({L"稀疏 · 整拍",L"标准 · 半拍",L"密集 · 1/4拍"});draftDensity->setSelectedIndex(1);draft->addWidget(draftDensity,135);
+            draftDensity=new ComboBox();draftDensity->setId("chart_draft_density");draftDensity->setItems({L"稀疏 · 强起音",L"标准 · 起音",L"密集 · 更多起音"});draftDensity->setSelectedIndex(1);draft->addWidget(draftDensity,135);
             button(draft,L"生成节奏草稿","chart_generate",[this]{generateDraft();},120);
-            draft->addWidget(label(L"替换当前音符 · 可撤销 · 生成后精修"));
+            nearbyDraftSnap=new CheckBox();nearbyDraftSnap->setId("chart_draft_snap");nearbyDraftSnap->setText(L"仅吸附附近节拍 ≤25ms");draft->addWidget(nearbyDraftSnap,205);
+            auto* evidence=row(page,28);showOnsets=new CheckBox();showOnsets->setText(L"显示起音标记");showOnsets->setChecked(true);evidence->addWidget(showOnsets,130);
+            rhythmReport=label(L"等待歌曲分析 · 草稿保留真实发音时刻","chart_rhythm_report");evidence->addWidget(rhythmReport);
             auto* file=row(page,36);file->addWidget(label(L"谱面虚拟路径"),105);
             const auto stamp=std::chrono::system_clock::now().time_since_epoch().count();path=field(file,"chart_path",L"audio/charts/Chart_"+std::to_wstring(stamp)+L".chart.json",0);
             button(file,L"打开谱面","chart_load",[this]{loadAsset();},90);button(file,L"保存谱面","chart_save",[this]{saveAsset();},90);
             button(file,L"资产目录…","chart_folder",[this]{if(folder){const auto chosen=folder();if(!chosen.empty())assetOverride=chosen;}},90);
         }
         wave=new Waveform();wave->setId("chart_waveform");wave->editableRange=false;wave->showSelection=false;wave->emptyText=L"音乐波形 · 滚轮缩放，中键拖动轨道平移";wave->onSeek=[this](double t){seek(t);};wave->navigable=!preview;wave->contentInset=preview?76:0;
-        wave->overlay=[this](IRenderBackend& r){auto area=wave->getWorldBounds();area.minX+=wave->contentInset;ChartCanvas::drawGrid(r,document,color("$color.text.muted"),color("$color.border"),area,wave->origin,std::max(.001,wave->visible),preview?4:1<<snap->getSelectedIndex());};
+        wave->overlay=[this](IRenderBackend& r){auto area=wave->getWorldBounds();area.minX+=wave->contentInset;ChartCanvas::drawGrid(r,document,color("$color.text.muted"),color("$color.border"),area,wave->origin,std::max(.001,wave->visible),preview?4:1<<snap->getSelectedIndex());
+            if(!preview&&showOnsets->isChecked()){auto first=std::lower_bound(analysis.onsets.begin(),analysis.onsets.end(),wave->origin,[](const auto& o,double t){return o.time<t;});
+                for(auto it=first;it!=analysis.onsets.end()&&it->time<=wave->origin+wave->visible;++it){if(it->strength<.3f)continue;const float x=wave->x(it->time);
+                    r.drawRect({x,area.maxY-12,x+1,area.maxY},FVector4{.95f,.7f,.25f,1});}}};
         page->addWidget(wave,preview?80:106);
         auto* transport=row(page,36);
         if(preview){leadInChoice=new ComboBox();leadInChoice->setId("chart_leadin");leadInChoice->setItems({L"立即开始",L"准备 0.5秒",L"准备 2秒"});leadInChoice->setSelectedIndex(1);transport->addWidget(leadInChoice,125);button(transport,L"重新开始","chart_restart",[this]{start();},110);button(transport,L"暂停 / 继续","chart_pause",[this]{togglePause();},120);}
@@ -264,9 +270,9 @@ public:
     }
     void seek(double t){wave->position=std::clamp(t,0.0,wave->duration);if(valid()&&voice)bound->setVoicePositionFrames(voice,uint64_t(wave->position*bound->outputSampleRate()));wave->markDirty();canvas->markDirty();}
     void generateDraft(){if(busy()||!music){message=L"先导入歌曲并等待分析完成";return;}
-        try{auto next=document;next.notes=rhythm::draft(analysis,document,wave->duration,draftDensity->getSelectedIndex());
+        try{auto next=document;next.notes=rhythm::draft(analysis,document,wave->duration,draftDensity->getSelectedIndex(),nearbyDraftSnap->isChecked());
             if(next.notes.empty())throw std::runtime_error("no usable rhythmic onsets; edit manually");next.validate(wave->duration);
-            history.remember(document);document=std::move(next);canvas->selected=-1;dirty=true;message=L"已生成点按节奏草稿 · 可撤销、移动及改成长按";canvas->markDirty();}
+            history.remember(document);document=std::move(next);canvas->selected=-1;dirty=true;message=L"已根据真实起音生成 "+std::to_wstring(document.notes.size())+L" 个点 · 低/高频分配轨道 · 可撤销精修";canvas->markDirty();}
         catch(const std::exception& e){message=L"生成失败："+wide(e.what());}}
     static std::string cacheAudio(const std::shared_ptr<std::vector<float>>& pcm,uint32_t rate,uint32_t channels){
         const auto folder=std::filesystem::temp_directory_path()/"AYAudioChartPreview";std::filesystem::create_directories(folder);
@@ -345,6 +351,7 @@ public:
     void tick(){
         pollJobs();
         if(!preview){canvas->division=1<<snap->getSelectedIndex();
+            if(rhythmReport)rhythmReport->setText(busy()?L"后台分析中…":L"起音候选 "+std::to_wstring(analysis.onsets.size())+L" · 半拍网格贴合 "+number(rhythm::gridFit(analysis,document)*100,0)+L"% · 草稿保留原时刻");
             for(const char* id:{"chart_music_open","chart_load","chart_run","chart_generate","chart_analyze","chart_save"})
                 if(auto* control=dynamic_cast<Button*>(findControl(page,id)))control->setEnabled(!busy());
             if(valid()&&voice){VoiceRuntime state;if(bound->voiceState(voice,state)){wave->position=double(state.positionFrames)/bound->outputSampleRate();wave->markDirty();}else voice=0;}

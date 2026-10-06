@@ -29,6 +29,8 @@
 #include "AYUI/UIManager.h"
 
 #include <cstdio>
+#include <chrono>
+#include <fstream>
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -130,6 +132,13 @@ std::intptr_t handleMessage(AppState *state, unsigned msg, std::uintptr_t wParam
 
     switch (msg)
     {
+    case WM_CLOSE: {
+        // Keep HWND alive for GPU teardown, but dismiss the preview immediately.
+        // No last frame may be submitted after this request.
+        state->running=false;
+        if(state->devices) ::ShowWindow(static_cast<HWND>(state->devices->window().getWindowHandle()),SW_HIDE);
+        handled=true;return 0;
+    }
     case WM_SETCURSOR: {
         ::SetCursor(cursorForHint(ui.getCursorHint()));
         handled = true;
@@ -449,6 +458,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     while (state.running && window.isWindowValid())
     {
         devices.pollEvents();
+        if(!state.running || !window.isWindowValid()) break;
 
         LARGE_INTEGER qpcNow{};
         ::QueryPerformanceCounter(&qpcNow);
@@ -480,11 +490,22 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         renderer.endFrame();
     }
 
-    session.detach();
-    ui.shutdown();
-    uiBackend.shutdown();
-    renderer.shutdown();
-    devices.shutdown();
-    audio.shutdown();
+    // Small local stage timings let slow driver cleanup be distinguished from session jobs.
+    const auto exitStarted=std::chrono::steady_clock::now();auto stageStart=exitStarted;
+    std::vector<std::pair<const char*,double>> exitStages;
+    auto stage=[&](const char* name){const auto now=std::chrono::steady_clock::now();exitStages.emplace_back(name,std::chrono::duration<double,std::milli>(now-stageStart).count());stageStart=now;};
+    state.session=nullptr;
+    session.detach();stage("session");
+    audio.shutdown();stage("audio");
+    ui.shutdown();stage("ui");
+    uiBackend.shutdown();stage("uiBackend");
+    renderer.shutdown();stage("renderer");
+    devices.shutdown();stage("window");
+    if(!chartPreview.empty())try{
+        const auto dir=std::filesystem::temp_directory_path()/"AYAudioChartPreview";
+        std::filesystem::create_directories(dir);std::ofstream log(dir/("Exit_"+std::to_string(GetCurrentProcessId())+".log"));
+        for(const auto& [name,milliseconds]:exitStages)log<<name<<" "<<milliseconds<<" ms\n";
+        log<<"total "<<std::chrono::duration<double,std::milli>(stageStart-exitStarted).count()<<" ms\n";
+    }catch(...){}
     return 0;
 }

@@ -200,8 +200,12 @@ normalizes PCM. Reliable estimates apply automatically; silence/steady tones/low
 retain manual settings. Manual edits during preparation take precedence. BPM half/double, ±1ms beat
 offset and setting the current song position as beat one are editable and undoable.
 Waveform and chart share seconds/bar:beat grid, cursor, zoom/pan, live seeking and optional follow.
-Generate rhythm draft replaces notes only on explicit action, with sparse/standard/dense snapped taps
-and one reversible history entry. This is an onset-based draft, not semantic musical transcription.
+Generate rhythm draft replaces notes only on explicit action, with sparse/standard/dense real attack taps
+and one reversible history entry. Original attack times are retained by default; optional snapping moves
+only attacks already within 25ms of a beat cell. Density selects strong attacks, never fills empty beats.
+Waveform yellow ticks expose detected attacks; half-beat grid fit reports ±35ms alignment.
+Low/high-frequency attack evidence assigns left/right lane pairs, alternating within each pair. This is
+coarse spectral placement, not instrument separation, pitch transcription or musical phrasing. This is an onset-based draft, not semantic musical transcription.
 Preview uses a reusable decoded temporary PCM16 WAV, background preparation and asynchronous child decode.
 Horizontal D/F/J/K lanes show heads, holds and recent grade/accuracy/early-late errors. Accuracy is
 max(0,1−|error|/150ms)×100; holds take the lower endpoint accuracy, misses are 0. Total is the mean
@@ -209,3 +213,7 @@ of finished-note accuracies. Perfect/Good windows remain ±45/150ms; this is not
 Limits: fixed tempo estimated in 60–200 BPM, 4/4 display, ≤600s/256MiB source and normalized PCM;
 first 180s inform tempo, the full song informs draft onsets. Temporary caches live in OS Temp.
 See AUDIO-AUTHORING §11 and AudioChartTests/EditorAudioChartTests.
+
+Preview close dismisses the window before teardown and skips the final render frame. The HWND remains
+alive until GPU shutdown; voices, jobs and devices still clean up normally. Small per-stage timings are
+written locally to OS Temp/AYAudioChartPreview/Exit_<pid>.log for driver/worker diagnostics.

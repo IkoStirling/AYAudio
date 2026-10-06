@@ -76,4 +76,26 @@ TEST_CASE(OrderedJudgeVisitsOnlyDueNotesAndBoundsRecentFeedback){
     j.update(d,10);CHECK(j.feedback.size()==8);CHECK(j.count(Judge::Miss)==40);
 }
 
+TEST_CASE(RhythmDraftKeepsOffGridAttacksRestsAndStrongerNearbyEvents){
+    using namespace ayt::audio::rhythm;Analysis a;
+    a.onsets={{.713,1,.8f},{1.02,.6f,.2f},{1.027,1.2f,.2f},{1.319,1,.8f},{4.06,1.1f,.2f},{4.37,1,.8f}};
+    Document doc;doc.audio="song.wav";doc.bpm=120;
+    const auto notes=draft(a,doc,5,2);CHECK(notes.size()==5);CHECK(notes[0].time==.713);CHECK(notes[1].time==1.027);CHECK(notes[2].time==1.319);
+    CHECK(notes[3].time==4.06);CHECK(notes[0].lane<2);CHECK(notes[1].lane>=2);
+    for(const auto& n:notes){CHECK(n.time==n.end);bool actual=false;for(const auto& o:a.onsets)actual|=n.time==o.time;CHECK(actual);}
+    const auto snapped=draft(a,doc,5,2,true);CHECK(snapped[0].time==.713);CHECK(snapped[1].time==1.027);CHECK(snapped[3].time==4.06);
+    Analysis nearBeat;nearBeat.onsets={{1.02,1,.8f},{1.31,1,.2f}};const auto nearby=draft(nearBeat,doc,2,2,true);
+    CHECK(nearby[0].time==1);CHECK(nearby[1].time==1.31);CHECK(gridFit(a,doc)<.5);
+}
+TEST_CASE(SpectralAttacksFollowIrregularNotesInsteadOfUniformBeatFilling){
+    using namespace ayt::audio::rhythm;const unsigned rate=8000;std::vector<float> pcm(rate*8);
+    const std::vector<double> heads{.713,1.017,1.32,2.06,2.37,4.13,4.61,5.91};
+    for(size_t n=0;n<heads.size();++n){const size_t first=size_t(heads[n]*rate);const double hz=n%2?880:220;
+        for(size_t f=0;f<rate*.18&&first+f<pcm.size();++f)pcm[first+f]+=float(.3*std::exp(-double(f)/(rate*.05))*std::sin(6.283185307179586*hz*f/rate));}
+    const auto a=analyze(pcm.size(),1,rate,[&](size_t f,unsigned){return pcm[f];});CHECK(a.onsets.size()>=heads.size());
+    for(double head:heads){bool found=false;for(const auto& o:a.onsets)if(std::abs(head-o.time)<.04)found=true;CHECK(found);}
+    Document doc;doc.audio="music.wav";doc.bpm=120;const auto notes=draft(a,doc,8,1);CHECK(notes.size()>=6);CHECK(notes.size()<=heads.size()+1);
+    for(const auto& n:notes){bool nearHead=false;for(double head:heads)if(std::abs(head-n.time)<.04)nearHead=true;CHECK(nearHead);}
+}
+
 TEST_SUITE_END
