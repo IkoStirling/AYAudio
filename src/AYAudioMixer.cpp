@@ -66,6 +66,7 @@ bool AudioMixer::initialize(uint32_t maxVoices, uint16_t outputChannels, uint32_
     }
 
     _duck = DuckingState{};
+    _busPeaks.fill(0);
 
     // v2.0b: size reverb delay lines from the active preset. Clamp the
     // preset index so a caller-supplied garbage value falls back to 0.
@@ -111,6 +112,8 @@ bool AudioMixer::initialize(uint32_t maxVoices, uint16_t outputChannels, uint32_
 }
 
 void AudioMixer::reset() {
+    _busPeaks.fill(0);
+    _outputLevels = {};
     _masterGain = 1.0f;
     for (auto& bus : _buses) {
         bus.gain = 1.0f;
@@ -254,6 +257,8 @@ void AudioMixer::mix(float* output,
     // v2.0b ducking probe: clear at the top of the block; OR'd into for
     // every voice. Engine integrates the envelope after this call returns.
     _duck.activeBusMask = 0;
+    _busPeaks.fill(0);
+    for(auto& bus:_busMeterSamples) std::fill_n(bus.begin(),outputFrames*_outputChannels,0.f);
 
     // v2.0b reverb wet-send accumulator: clear at the top, populate per
     // voice (when reverbSend > 0), process through Schroeder network,
@@ -295,6 +300,9 @@ void AudioMixer::mix(float* output,
                 (voices[i].bus == AudioBus::Music) ? duckLinear : 1.0f;
             const float totalGain = busGain * voiceGain * _masterGain * duckMul;
 
+            if(busIdx<_busMeterSamples.size()) for(uint32_t sample=0;sample<outputFrames*_outputChannels;++sample)
+                _busMeterSamples[busIdx][sample]+=scratch[sample]*totalGain;
+
             // Probe: mark which buses had an active voice this block.
             if (busIdx < 32) {
                 _duck.activeBusMask |= (1u << busIdx);
@@ -333,6 +341,9 @@ void AudioMixer::mix(float* output,
             }
         }
     }
+
+    for(size_t bus=0;bus<_busPeaks.size();++bus) for(uint32_t sample=0;sample<outputFrames*_outputChannels;++sample)
+        _busPeaks[bus]=std::max(_busPeaks[bus],std::abs(_busMeterSamples[bus][sample]));
 
     // Process the wet-send accumulator through the Schroeder network and
     // mix the result into output. Stereo only — mono paths skip reverb

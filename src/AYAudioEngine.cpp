@@ -13,6 +13,16 @@
 
 namespace ayt::audio
 {
+AudioEngine::DebugSnapshot AudioEngine::debugSnapshot() const {
+    std::lock_guard<std::recursive_mutex> lock(_stateMutex);
+    DebugSnapshot result;result.listener=_listener;result.masterGain=_mixer.getMasterGain();result.paused=_paused;
+    for(const auto& voice:_voices) if(voice.voiceId && voice.playing) result.voices.push_back(voice);
+    for(size_t i=0;i<result.busGains.size();++i) result.busGains[i]=_mixer.getBusGain(static_cast<AudioBus>(i));
+    result.busPeaks=_mixer.busPeaks();result.output=outputLevels();
+    if (_paused || !_initialized) result.busPeaks.fill(0);
+    return result;
+}
+
 
 namespace {
 std::atomic<uint64_t> gAudioLifecycle{0};

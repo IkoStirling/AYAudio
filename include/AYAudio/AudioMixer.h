@@ -56,6 +56,8 @@ public:
     float getBusGain(AudioBus bus) const;
     float getMasterGain() const { return _masterGain; }
     AudioOutputLevels outputLevels() const { return _outputLevels; }
+    /// Last dry bus sum after voice/bus/duck/master gain, before reverb and clamping.
+    const auto& busPeaks() const noexcept { return _busPeaks; }
 
     // ===== Ducking (v2.0b) =====
     void setDucking(float depthDb, float attackPerSec, float releasePerSec);
@@ -108,6 +110,8 @@ private:
     // outputChannels == 2 path used by mix()).
     void _processReverbWet(const float* sendBuffer, float* output, uint32_t frames);
 
+    std::array<float,static_cast<size_t>(AudioBus::Count)> _busPeaks{};
+    std::array<std::array<float,8192>,static_cast<size_t>(AudioBus::Count)> _busMeterSamples{};
     std::array<BusState, static_cast<size_t>(AudioBus::Count)> _buses{};
     float _masterGain = 1.0f;
     AudioOutputLevels _outputLevels{};

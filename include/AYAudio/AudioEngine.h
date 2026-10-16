@@ -42,6 +42,13 @@ class AudioStreamRingBuffer; // full type lives in src/AYAudioEngine.cpp
 
 class AudioEngine {
 public:
+    struct DebugSnapshot {
+        ListenerParams listener; std::vector<VoiceRuntime> voices;
+        std::array<float,static_cast<size_t>(AudioBus::Count)> busGains{},busPeaks{};
+        AudioOutputLevels output; float masterGain=0; bool paused=false;
+    };
+    /// One coherent owned owner-thread observation, guarded against the audio callback.
+    DebugSnapshot debugSnapshot() const;
     AudioEngine();
     ~AudioEngine();
 

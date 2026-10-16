@@ -217,3 +217,9 @@ See AUDIO-AUTHORING §11 and AudioChartTests/EditorAudioChartTests.
 Preview close dismisses the window before teardown and skips the final render frame. The HWND remains
 alive until GPU shutdown; voices, jobs and devices still clean up normally. Small per-stage timings are
 written locally to OS Temp/AYAudioChartPreview/Exit_<pid>.log for driver/worker diagnostics.
+
+## Debug content extension (2026-10-15)
+
+AudioEngine::debugSnapshot owns coherent listener, active/paused voice, bus gain/peak and output observations under the existing audio state mutex. Mixer bus meters sum spatial/voice/bus/duck/master-gained dry samples per bus before measuring amplitude; destructive interference is preserved. The fixed preallocated meter scratch adds no callback allocation. Peaks exclude reverb and are not RMS/LUFS. Reset/silent blocks clear meters. Diagnostics never seek or consume voices.
+
+2026-10-16: rebuilt AYAudio_Tests and ran the full module suite: 174 selected, 172 passed, 2 explicit skips (opt-in WASAPI capture and absent optional MP3), 1379 assertions passed. Reset clears bus/output meters; paused or shut-down snapshots report zero bus peaks. No interactive editor acceptance is claimed. Raw report: out/audio-completion-20261016/baseline-native.json.

@@ -491,4 +491,13 @@ TEST_SUITE(AudioEngineTests)
         engine.play(engine.registerClip(desc));std::vector<float> output(10000);engine.render(output.data(),5000);
         CHECK(engine.outputLevels().left>0);CHECK(engine.outputLevels().left==engine.outputLevels().right);
     }
+TEST_CASE(DebugSnapshotOwnsVoiceAndListenerValuesWithoutChangingPlayback) {
+    AudioEngine engine;CHECK(engine.initialize(defaultSettings()));
+    const auto clip=engine.registerClip(makeSineClip(128));const auto voice=engine.play(clip);
+    ListenerParams listener;listener.position={3,4,5};engine.setListener(listener);
+    auto snapshot=engine.debugSnapshot();CHECK(snapshot.voices.size()==1);CHECK(snapshot.voices[0].voiceId==voice);CHECK(snapshot.listener.position.x==3);
+    engine.setVoiceVolume(voice,.25f);listener.position.x=10;engine.setListener(listener);
+    CHECK(snapshot.voices[0].volume==1);CHECK(snapshot.listener.position.x==3);
+    CHECK(engine.debugSnapshot().voices[0].volume==.25f);engine.shutdown();CHECK(engine.debugSnapshot().voices.empty());
+}
 TEST_SUITE_END

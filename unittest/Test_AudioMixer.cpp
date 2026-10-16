@@ -372,4 +372,16 @@ TEST_SUITE(AudioMixerTests)
         // energy in the tail than the small-room preset.
         CHECK(e1 > e0);
     }
+TEST_CASE(BusPeaksMeasureSummedDrySignalAndResetOnSilentBlock) {
+    AudioMixer mixer;CHECK(mixer.initialize(4,2,48000));
+    VoiceRuntime voices[2];voices[0].bus=voices[1].bus=AudioBus::Sfx;
+    AudioMixer::VoiceSourceFn sources[2]={constantSource,constantSource};void* users[2]={};float output[16]{};
+    mixer.setBusGain(AudioBus::Sfx,.5f);mixer.mix(output,8,voices,sources,users,2);
+    CHECK_FLOAT_EQ(mixer.busPeaks()[size_t(AudioBus::Sfx)],1.f,1e-6f);
+    voices[1].volume=-1; // Diagnostic sums must preserve cancellation before taking a peak.
+    mixer.mix(output,8,voices,sources,users,2);CHECK_FLOAT_EQ(mixer.busPeaks()[size_t(AudioBus::Sfx)],0.f,1e-6f);
+    mixer.mix(output,8,nullptr,nullptr,nullptr,0);CHECK_FLOAT_EQ(mixer.busPeaks()[size_t(AudioBus::Sfx)],0.f,1e-6f);
+    voices[1].volume=1; mixer.mix(output,8,voices,sources,users,2);
+    mixer.reset(); CHECK(mixer.busPeaks()[size_t(AudioBus::Sfx)]==0); CHECK(mixer.outputLevels().left==0);
+}
 TEST_SUITE_END
