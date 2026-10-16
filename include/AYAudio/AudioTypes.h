@@ -32,6 +32,7 @@ enum class AudioBus : uint8_t {
     Sfx,
     Ui,
     Voice,
+    Preview, // editor audition routing; independent gain/effects, shares master output
     Count,
 };
 
@@ -137,7 +138,7 @@ struct ListenerParams {
     ayt::math::FVector3 velocity{};
 
     float masterSpatialScale = 1.0f;       // 1 unit = 1 meter default
-    // Lightweight ILD-based HRTF approximation (v2.3). Full SOFA tables = v3.
+    // Enables bound SOFA HRIR processing; without a profile uses the lightweight ILD approximation.
     bool hrtfEnabled = false;
 };
 

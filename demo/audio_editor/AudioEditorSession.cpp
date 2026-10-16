@@ -3,6 +3,7 @@
 #include "AudioRhythmAnalysis.h"
 #include <optional>
 #include "PerformanceRenderer.h"
+#include "AudioAuthoringSettings.h"
 #include <future>
 #include <atomic>
 #ifdef _WIN32
@@ -281,7 +282,7 @@ void AudioEditorSession::bindChrome() {
     bindButton("btn_instrument",[this](){ if (ensureClips()) buildInstrument(!_sine); updateKeys(); });
     bindButton("btn_load_sample",[this](){ loadSample(); });
     bindButton("btn_release_notes",[this](){ releaseKeys(); });
-    bindButton("btn_sustain",[this](){ if(!ensureClips()) return; _pedalLatch=!_pedalLatch; if (_instrument) _instrument->setSustain(_spaceDown || _pedalLatch); updateKeys(); });
+    bindButton("btn_sustain",[this](){ if(!ensureClips()) return; _pedalLatch=!_pedalLatch; if (_instrument) _instrument->setSustain(sustainHeld()); updateKeys(); });
     bindSlider("sld_velocity",[this](float v){_velocity=v/100.0f;});
     bindSlider("sld_preview",[this](float v){
         _previewGain=v/100.0f; if (!ensureClips()) return; if (_instrument) _instrument->setGain(_previewGain);
@@ -620,19 +621,25 @@ void AudioEditorSession::loadSample() {
     if(_workbench&&_workbench->performance&&_workbench->performance->busy())return;
     if (!_pathPicker || !ensureClips()) return;
     releaseKeys(); const auto path=_pathPicker(); if (path.empty() || !ensureClips()) return;
+    loadSamplePath(path,(_octave+1)*12);
+}
+bool AudioEditorSession::loadSamplePath(const std::string& path,int root) {
+    if(!ensureClips()||root<0||root>127)return false;
     ayt::resource::AudioLoader loader;
     auto resource=std::dynamic_pointer_cast<ayt::resource::Audio>(loader.load(path));
-    if (!resource) {setStatus(L"Sample could not be decoded; choose WAV, MP3, OGG or cooked audio");return;}
+    if (!resource) {setStatus(L"Sample could not be decoded; choose WAV, MP3, OGG or cooked audio");return false;}
     auto* e=liveEngine(); const auto clip=_audio->registerClipFromResource(resource.get());
-    if (!clip) {setStatus(L"Sample registration failed (clip capacity or PCM format)");return;}
+    if (!clip) {setStatus(L"Sample registration failed (clip capacity or PCM format)");return false;}
+    releaseKeys();
     _instrument.reset(); for (auto c:_instrumentClips) e->releaseClip(c); _instrumentClips={clip};
     _instrument=std::make_unique<SampleInstrument>(*e,16); _instrument->setGain(_previewGain); _instrument->setPaused(_paused);
-    const int root=(_octave+1)*12; _instrument->addRegion({clip,root,std::max(0,root-12),std::min(127,root+24)});
+    _instrument->addRegion({clip,root,std::max(0,root-12),std::min(127,root+24)});
     _performanceSampleSource=chart::utf8(std::filesystem::absolute(std::filesystem::path(path)));
     _performanceSampleRoot=root;
     _instrumentName=L"Sample (root C"+std::to_wstring(_octave)+L")";
     if (_workbench) {_workbench->piano->low=std::max(0,root-12);_workbench->piano->high=std::min(127,root+24);_workbench->applyInstrument();}
     updateKeys();
+    return true;
 }
 void AudioEditorSession::pressPitch(int pitch,bool keyboard,bool down) {
     if (pitch<0 || pitch>127) return;
@@ -640,19 +647,45 @@ void AudioEditorSession::pressPitch(int pitch,bool keyboard,bool down) {
     else if (!_instrument || liveEngine()!=_boundEngine || !liveEngine() || liveEngine()->lifecycleGeneration()!=_engineGeneration) {
         (keyboard ? _keyboard[pitch] : _mouse[pitch])=false; return;
     }
-    const bool before=_keyboard[pitch] || _mouse[pitch];
+    const bool before=pitchHeld(pitch);
     (keyboard ? _keyboard[pitch] : _mouse[pitch])=down;
-    const bool after=_keyboard[pitch] || _mouse[pitch];
-    const double eventTime=performanceTime();
+    const bool after=pitchHeld(pitch);
+    const double eventTime=performanceTime()-_inputOffsetSeconds;
     if (!before && after && !_instrument->noteOn(pitch,_velocity)) {
         (keyboard ? _keyboard[pitch] : _mouse[pitch])=false;
         setStatus(L"音符不可用：超出音源范围或声部容量");
     }
     if (before && !after) _instrument->noteOff(pitch);
-    if (_workbench && _workbench->performance && before!=(_keyboard[pitch]||_mouse[pitch]))
-        _workbench->performance->note(pitch,_keyboard[pitch]||_mouse[pitch],_velocity,eventTime);
+    if (_workbench && _workbench->performance && before!=pitchHeld(pitch))
+        _workbench->performance->note(pitch,pitchHeld(pitch),_velocity,eventTime);
     updateKeys();
     if (_workbench) _workbench->noteStatus->setText(L"实际音高："+workbench::noteName(pitch));
+}
+bool AudioEditorSession::pitchHeld(int pitch) const {
+    if(pitch<0||pitch>127)return false;
+    if(_keyboard[pitch]||_mouse[pitch])return true;
+    for(const auto& channel:_midi)if(channel[pitch])return true;return false;
+}
+bool AudioEditorSession::sustainHeld()const {
+    return _spaceDown||_pedalLatch||std::any_of(_midiPedal.begin(),_midiPedal.end(),[](bool v){return v;});
+}
+void AudioEditorSession::handleMidiEvent(const MidiEvent& event){
+    if(event.channel>=16||event.key>=128||event.value>=128||!std::isfinite(event.time))return;
+    if(event.kind==MidiEvent::Kind::ControlChange){
+        if(event.key==64){_midiPedal[event.channel]=event.value>=64;if(_instrument)_instrument->setSustain(sustainHeld());if(_workbench&&_workbench->performance)_workbench->performance->sustain(sustainHeld());}
+        if(event.key==120||event.key==123){for(int key=0;key<128;++key)if(_midi[event.channel][key]){auto off=event;off.kind=MidiEvent::Kind::NoteOff;off.key=uint8_t(key);handleMidiEvent(off);}}
+        return;
+    }
+    if(event.kind!=MidiEvent::Kind::NoteOn&&event.kind!=MidiEvent::Kind::NoteOff)return;
+    const bool down=event.kind==MidiEvent::Kind::NoteOn&&event.value>0;
+    if(down&&(!ensureClips()||!_instrument))return;
+    const int key=event.key;const bool before=pitchHeld(key);_midi[event.channel][key]=down;bool after=pitchHeld(key);
+    if(_instrument&&liveEngine()==_boundEngine&&liveEngine()&&liveEngine()->lifecycleGeneration()==_engineGeneration){
+        if(!before&&after&&!_instrument->noteOn(key,event.value/127.f)){_midi[event.channel][key]=false;after=pitchHeld(key);}
+        if(before&&!after)_instrument->noteOff(key);
+    }
+    if(_workbench&&_workbench->performance&&before!=after)_workbench->performance->note(key,after,event.value/127.f,event.time-_inputOffsetSeconds);
+    updateKeys();
 }
 void AudioEditorSession::pressNote(int index,bool keyboard,bool down) {
     if (index>=0 && index<13) pressPitch((_octave+1)*12+index+(_workbench?_workbench->shift:0),keyboard,down);
@@ -682,7 +715,7 @@ bool AudioEditorSession::handleKey(int key, bool pressed) {
         return true;
     }
     if (pressed && (editing || (_ui && ((_ui->getModifiers() & 2u) || ((_ui->getModifiers() & 4u) && !_leftAlt))))) return false;
-    if (key==32) { if (!ensureClips()) return false;_spaceDown=pressed;if (_instrument) _instrument->setSustain(pressed||_pedalLatch);if(_workbench->performance)_workbench->performance->sustain(pressed||_pedalLatch);updateKeys();return true; }
+    if (key==32) { if (!ensureClips()) return false;_spaceDown=pressed;if (_instrument) _instrument->setSustain(sustainHeld());if(_workbench->performance)_workbench->performance->sustain(sustainHeld());updateKeys();return true; }
     const int offset = workbench::keyboardOffset(key);
     if (offset == 128 || !pressed) return false;
     if (_keyPitches[key] >= 0) return true; // native auto-repeat must not create another voice
@@ -711,6 +744,7 @@ bool AudioEditorSession::handleMouseWheel(float x,float y,float deltaY) {
     return _workbench->performance->wheel({x,y},deltaY,_ui->pickTopmostWidget({x,y}));
 }
 void AudioEditorSession::onFocusLost() {
+    if(_workbench)_workbench->midi.close();
     releaseKeys();
     if (_workbench && _workbench->chart) _workbench->chart->focusLost();
     if (_workbench && _workbench->performance) _workbench->performance->focusLost();
@@ -732,6 +766,7 @@ void AudioEditorSession::releaseKeys() {
     if (_workbench && _workbench->performance) _workbench->performance->releaseNotes();
     if (_workbench && _workbench->piano) _workbench->piano->cancel();
     _keyboard.fill(false); _mouse.fill(false); _mouseKey=-1; _spaceDown=false; _pedalLatch=false;
+    for(auto& channel:_midi)channel.fill(false);_midiPedal.fill(false);
     _keyPitches.fill(-1); _leftShift=false; _leftAlt=false;
     if (_instrument) {
         const auto* e=liveEngine();

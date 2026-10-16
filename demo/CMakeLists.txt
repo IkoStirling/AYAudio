@@ -59,6 +59,7 @@ endif()
 
 if(MSVC)
     target_compile_options(AYAudio_AudioEditor PRIVATE /Zc:__cplusplus /Zc:preprocessor)
+    set_source_files_properties(audio_editor/AudioEditorSession.cpp PROPERTIES COMPILE_OPTIONS /bigobj)
     target_compile_definitions(AYAudio_AudioEditor PRIVATE
         NOMINMAX
         WIN32_LEAN_AND_MEAN
@@ -74,6 +75,13 @@ target_compile_definitions(AYAudio_AudioEditor PRIVATE
 )
 
 add_custom_command(TARGET AYAudio_AudioEditor POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:AYAudio_AudioEditor>/assets/licenses"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty/libmysofa/LICENSE"
+        "$<TARGET_FILE_DIR:AYAudio_AudioEditor>/assets/licenses/libmysofa-BSD-3-Clause.txt"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty/libmysofa/SPEEX-LICENSE.txt"
+        "$<TARGET_FILE_DIR:AYAudio_AudioEditor>/assets/licenses/Speex-BSD.txt"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/assets
         $<TARGET_FILE_DIR:AYAudio_AudioEditor>/assets
@@ -91,6 +99,8 @@ endif()
 # The shared workbench is textually included; track it even without compiler dep scanning.
 set_property(SOURCE audio_editor/AudioEditorSession.cpp APPEND PROPERTY OBJECT_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/AudioWorkbench.inl"
+    "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/AudioWorkbenchExtensions.inl"
+    "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/AudioAuthoringSettings.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/ChartWorkbench.inl"
     "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/ChartDocument.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/audio_editor/AudioRhythmAnalysis.h"

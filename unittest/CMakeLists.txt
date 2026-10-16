@@ -12,6 +12,10 @@ add_executable(${TEST_TARGET}
     Test_AudioClipRegistry.cpp
     Test_AudioSpatializer.cpp
     Test_AudioMixer.cpp
+    Test_AudioProcessing.cpp
+    Test_AudioContentPlayer.cpp
+    Test_MidiInput.cpp
+    Test_AudioLatencyDevice.cpp
     Test_AudioEngine.cpp
     Test_AudioRecorder.cpp
     Test_ChartDocument.cpp
@@ -58,3 +62,16 @@ ay_add_test_tiers(${TEST_TARGET} PREFIX audio DEFAULT_TIER integration
     FAST_SUITES AudioCommandQueueTests AudioClipRegistryTests
                 AudioSpatializerTests AudioHrtfTests AudioStreamRingBufferTests
     TIMEOUT 120 RUN_SERIAL)
+
+if(TARGET AYUI AND TARGET AYUICurveEditor)
+    add_executable(AYAudio_AuthoringTests authoring_main.cpp Test_AudioAuthoring.cpp ../demo/audio_editor/AudioEditorSession.cpp)
+    target_link_libraries(AYAudio_AuthoringTests PRIVATE AYAudio AYTest AYUI AYUICurveEditor AYProject nlohmann_json::nlohmann_json)
+    if(WIN32)
+        target_link_libraries(AYAudio_AuthoringTests PRIVATE user32 ole32 shell32)
+    endif()
+    target_compile_definitions(AYAudio_AuthoringTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    if(MSVC)
+        target_compile_options(AYAudio_AuthoringTests PRIVATE /bigobj)
+    endif()
+    ay_add_test_tiers(AYAudio_AuthoringTests PREFIX audio-authoring DEFAULT_TIER integration TIMEOUT 120 RUN_SERIAL)
+endif()

@@ -5,6 +5,7 @@ project(AYAudio
 )
 
 set(MODULE_NAME AYAudio)
+add_subdirectory(thirdparty/libmysofa)
 
 # Core engine sources
 set(SRC_FILES
@@ -17,6 +18,9 @@ set(SRC_FILES
     src/AYAudioSampleInstrument.cpp
     src/AYAudioEmitterSystem.cpp
     src/AYAudioMixer.cpp
+    src/AYAudioProcessing.cpp
+    src/AYAudioContentPlayer.cpp
+    src/AYAudioMidiInput.cpp
     src/AYAudioSpatializer.cpp
     src/AYAudioStreamRingBuffer.cpp
     src/AYAudioSubSystem.cpp
@@ -51,6 +55,9 @@ set(HEAD_FILES
     include/AYAudio/SampleInstrument.h
     include/AYAudio/AudioEmitterSystem.h
     include/AYAudio/AudioMixer.h
+    include/AYAudio/AudioProcessing.h
+    include/AYAudio/AudioContentPlayer.h
+    include/AYAudio/MidiInput.h
     include/AYAudio/AudioSpatializer.h
     include/AYAudio/AudioStreamRingBuffer.h
     include/AYAudio/AudioSubSystem.h
@@ -83,6 +90,7 @@ if(NOT MINIAUDIO_INCLUDE_DIRS)
 endif()
 
 add_library(${MODULE_NAME} STATIC ${SRC_FILES} ${BACKEND_FILES} ${BACKEND_HEADERS} ${HEAD_FILES})
+target_link_libraries(${MODULE_NAME} PRIVATE AYAudio_MySofa)
 
 target_include_directories(${MODULE_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}

@@ -8,6 +8,9 @@
 #include <AYAudio/AudioTypes.h>
 #include <AYAudio/AudioCommandQueue.h>
 #include <AYAudio/AudioMixer.h>
+#include <AYAudio/AudioProcessing.h>
+#include <AYAudio/AudioContentPlayer.h>
+#include <AYAudio/MidiInput.h>
 #include <AYAudio/AudioSpatializer.h>
 #include <AYAudio/AudioClipRegistry.h>
 #include <AYAudio/AudioEngine.h>

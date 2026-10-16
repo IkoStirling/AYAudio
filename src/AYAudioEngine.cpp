@@ -17,9 +17,11 @@ AudioEngine::DebugSnapshot AudioEngine::debugSnapshot() const {
     std::lock_guard<std::recursive_mutex> lock(_stateMutex);
     DebugSnapshot result;result.listener=_listener;result.masterGain=_mixer.getMasterGain();result.paused=_paused;
     for(const auto& voice:_voices) if(voice.voiceId && voice.playing) result.voices.push_back(voice);
-    for(size_t i=0;i<result.busGains.size();++i) result.busGains[i]=_mixer.getBusGain(static_cast<AudioBus>(i));
-    result.busPeaks=_mixer.busPeaks();result.output=outputLevels();
-    if (_paused || !_initialized) result.busPeaks.fill(0);
+    for(size_t i=0;i<result.allBusGains.size();++i) result.allBusGains[i]=_mixer.getBusGain(static_cast<AudioBus>(i));
+    result.allBusPeaks=_mixer.busPeaks();result.output=outputLevels();
+    if (_paused || !_initialized) result.allBusPeaks.fill(0);
+    std::copy_n(result.allBusGains.begin(),result.busGains.size(),result.busGains.begin());
+    std::copy_n(result.allBusPeaks.begin(),result.busPeaks.size(),result.busPeaks.begin());
     return result;
 }
 
@@ -224,6 +226,7 @@ struct EnvelopeContext {
     void* data;
     VoiceRuntime* voice;
     bool mono=false;
+    AudioVoiceProcessor* processor=nullptr;
 };
 void renderEnvelope(void* data, uint32_t index, float* buffer, uint32_t frames) {
     auto& ctx = *static_cast<EnvelopeContext*>(data);
@@ -240,6 +243,7 @@ void renderEnvelope(void* data, uint32_t index, float* buffer, uint32_t frames) 
         buffer[2*f] *= gain; buffer[2*f+1] *= gain;
         ++v.ageFrames;
     }
+    if(ctx.processor)ctx.processor->process(buffer,frames);
     if (ctx.mono) for (uint32_t f=0;f<frames;++f) buffer[f]=(buffer[2*f]+buffer[2*f+1])*0.5f;
 }
 } // namespace
@@ -279,6 +283,8 @@ bool AudioEngine::initialize(const AudioSettings& settings) {
     _mixer.setMasterReverbReturn(settings.reverbReturn);
 
     _voices.assign(settings.maxVoices, VoiceRuntime{});
+    _voiceProcessors.assign(settings.maxVoices, AudioVoiceProcessor{});
+    _hrtfProfile.reset();
     _voiceCapacity = settings.maxVoices;
     _lifecycleGeneration = ++gAudioLifecycle;
     _engineFrame = 0;
@@ -340,6 +346,7 @@ void AudioEngine::shutdown() {
     }
 
     _voices.clear();
+    _voiceProcessors.clear();_hrtfProfile.reset();
     _voiceCapacity = 0;
     _lifecycleGeneration = ++gAudioLifecycle;
 
@@ -526,6 +533,7 @@ VoiceHandle AudioEngine::play(AudioClipId clip,
     cmd.loop = loop ? 1 : 0;
     cmd.appliedSynchronously = true;
     _commands.tryPush(cmd);
+    prepareVoiceProcessing();
     return vid;
 }
 
@@ -653,6 +661,7 @@ void AudioEngine::setVoiceSpatial(VoiceHandle voice, const SpatializationParams&
     if (idx < _voices.size()) {
         _voices[idx].spatial = spatial;
     }
+    prepareVoiceProcessing();
 }
 
 void AudioEngine::setBusGain(AudioBus bus, float linearGain) {
@@ -693,6 +702,37 @@ void AudioEngine::setListener(const ListenerParams& listener) {
     cmd.appliedSynchronously = true;
     _commands.tryPush(cmd);
     _listener = listener;
+    prepareVoiceProcessing();
+}
+
+bool AudioEngine::setBusEffects(AudioBus bus,const std::vector<AudioEffect>& effects,std::string* error){
+    std::lock_guard<std::recursive_mutex> lock(_stateMutex);
+    if(!_initialized){if(error)*error="audio engine is not initialized";return false;}
+    return _mixer.setBusEffects(bus,effects,error);
+}
+std::vector<AudioEffect> AudioEngine::busEffects(AudioBus bus)const{
+    std::lock_guard<std::recursive_mutex> lock(_stateMutex);return _mixer.busEffects(bus);
+}
+bool AudioEngine::setHrtfProfile(std::shared_ptr<HrtfProfile> profile){
+    std::lock_guard<std::recursive_mutex> lock(_stateMutex);
+    if(!_initialized||(profile&&profile->sampleRate()!=_settings.sampleRate))return false;
+    _hrtfProfile=std::move(profile);prepareVoiceProcessing();return true;
+}
+void AudioEngine::prepareVoiceProcessing(){
+    for(size_t i=0;i<_voices.size();++i){const auto& v=_voices[i];if(!v.playing)continue;
+        const auto& spatial=v.spatial;BinauralFilter filter;const bool world=spatial.mode!=SpatializationParams::Mode::Disabled&&spatial.spatialBlend>0;
+        const auto local=spatial.mode==SpatializationParams::Mode::Relative?spatial.position:AudioSpatializer::toListenerLocal(_listener,spatial.position);
+        const bool binaural=world&&_listener.hrtfEnabled&&_settings.channels==2&&_hrtfProfile&&_hrtfProfile->sampleRate()==_settings.sampleRate&&_hrtfProfile->filter(local,filter);
+        float cutoff=0;
+        if(world){const float amount=std::clamp(std::max(spatial.occlusion,spatial.obstruction*.5f),0.f,1.f);
+            cutoff=std::min(float(_settings.sampleRate)*.49f,20000.f)*(1-amount)+std::clamp(spatial.occlusionLowPassHz,20.f,20000.f)*amount;
+            const float distance=AudioSpatializer::worldDistance(_listener,_listener.position,spatial.mode==SpatializationParams::Mode::Relative?_listener.position+spatial.position:spatial.position);
+            cutoff=amount>0||spatial.airAbsorptionGainPerMeter>0?std::max(20.f,cutoff*std::exp(-std::max(0.f,spatial.airAbsorptionGainPerMeter)*distance)):0;
+        }
+        float dryL=1,dryR=1,attenuation=1;
+        if(binaural){AudioSpatializer::equalPowerPan(spatial.stereoPan,dryL,dryR);auto full=spatial;full.spatialBlend=1;auto listener=_listener;listener.hrtfEnabled=false;attenuation=AudioSpatializer::compute(listener,full,2).monoGain;}
+        _voiceProcessors[i].prepare(v.voiceId,binaural?&filter:nullptr,world?cutoff:0,_settings.sampleRate,spatial.spatialBlend,attenuation,dryL,dryR);
+    }
 }
 
 void AudioEngine::pause() {
@@ -884,6 +924,7 @@ VoiceHandle AudioEngine::playStream(AudioStreamId stream,
     cmd.loop = loop ? 1 : 0;
     cmd.appliedSynchronously = true;
     _commands.tryPush(cmd);
+    prepareVoiceProcessing();
     return vid;
 }
 
@@ -976,6 +1017,7 @@ void AudioEngine::submitFrame(float /*deltaTime*/) {
         }
     }
     ++_engineFrame;
+    prepareVoiceProcessing();
 }
 
 void AudioEngine::render(float* output, uint32_t frameCount) {
@@ -1029,6 +1071,7 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
     void* userData[kMaxVoicesPerRender]{};
     VoiceRuntime voiceSnapshot[kMaxVoicesPerRender]{};
     EnvelopeContext envelopes[kMaxVoicesPerRender]{};
+    AudioVoiceProcessor* processors[kMaxVoicesPerRender]{};
     uint32_t activeCount = 0;
 
     // Snapshot _timeScale once per render call so all voices see a coherent
@@ -1043,6 +1086,8 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
             continue;
         }
         SpatialGains gains = AudioSpatializer::compute(_listener, slot.spatial, _settings.channels);
+        processors[activeCount]=&_voiceProcessors[i];
+        if(processors[activeCount]->binaural())gains.leftGain=gains.rightGain=gains.monoGain=1;
 
         // v2.0b doppler: factor = AudioSpatializer::dopplerFactor(listener, voice)
         // is in [0.5, 2.0]. Multiplied by user `dopplerUserScale` (default 1.0)
@@ -1109,7 +1154,7 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
     }
 
     for (uint32_t i=0; i<activeCount; ++i) {
-        envelopes[i] = {sources[i], userData[i], &voiceSnapshot[i], _settings.channels==1};
+        envelopes[i] = {sources[i], userData[i], &voiceSnapshot[i], _settings.channels==1,processors[i]};
         sources[i] = &renderEnvelope; userData[i] = &envelopes[i];
     }
     _mixer.mix(output, frameCount, voiceSnapshot, sources, userData, activeCount);
@@ -1148,18 +1193,17 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
                 if (sctx.underrunLatched) {
                     _streamUnderrunCount.fetch_add(1, std::memory_order_relaxed);
                 }
-                if (sctx.finished) {
+                if (sctx.finished && !processors[i]->hasTail()) {
                     _voices[v].playing = false;
                 }
                 break;
             } else {
                 if (_voices[v].sourceKind != VoiceSourceKind::Clip) continue;
                 const VoiceSourceContext& ctx = clipContexts[i];
-                if (ctx.finished && !ctx.loop) {
+                _voices[v].positionFrames = ctx.positionFrames;
+                _voices[v].sourceFraction = ctx.fractionalAccum;
+                if (ctx.finished && !ctx.loop && !processors[i]->hasTail()) {
                     _voices[v].playing = false;
-                } else {
-                    _voices[v].positionFrames = ctx.positionFrames;
-                    _voices[v].sourceFraction = ctx.fractionalAccum;
                 }
                 break;
             }

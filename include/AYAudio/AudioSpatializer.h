@@ -14,7 +14,8 @@
 //
 // Attenuation models: Inverse / Linear / InverseClamped.
 // Cone gain and occlusion/obstruction gain are wired up in v1.
-// Low-pass filtering (occlusion cutoff, air absorption) is v2.
+// Gains are pure here. AudioEngine's persistent voice processor applies
+// occlusion/air low-pass and optional SOFA convolution after source envelopes.
 
 #include <AYCore.h>
 #include <AYAudio/AudioTypes.h>

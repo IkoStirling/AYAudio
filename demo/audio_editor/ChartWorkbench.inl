@@ -116,7 +116,7 @@ public:
     AudioEngine* bound=nullptr;uint64_t generation=0;AudioClipId clip=0;VoiceHandle voice=0;
     std::string source,assetOverride,pinnedRoot,lastFile,lastBytes;
     bool preview=false,running=false,paused=false,countdown=false,dirty=false;
-    double clock=0,anchor=0,pausedTime=0;uint64_t clockFrame=0;
+    double clock=0,anchor=0,pausedTime=0,inputOffset=0;uint64_t clockFrame=0;
     std::chrono::steady_clock::time_point epoch{},frameEpoch{};
     std::wstring message=L"选择音乐后，在轨道中放置音符";
     static std::wstring wide(const std::string& value){return std::filesystem::u8path(value).wstring();}
@@ -294,7 +294,7 @@ public:
         auto snapshot=previewSnapshot;snapshot.audio=cachedPreviewAudio;snapshot.audioRelative=false;
         const auto temp=std::filesystem::temp_directory_path()/"AYAudioChartPreview";std::filesystem::create_directories(temp);
         static std::atomic<uint64_t> serial{0};const auto file=temp/("Preview_"+std::to_string(std::chrono::system_clock::now().time_since_epoch().count())+"_"+std::to_string(++serial)+".chart.json");
-        std::ofstream out(file,std::ios::binary|std::ios::trunc);auto json=snapshot.json();json["previewSongName"]=std::filesystem::path(source).filename().string();out<<json.dump(2);out.close();if(!out)throw std::runtime_error("cannot create preview snapshot");std::string error;
+        std::ofstream out(file,std::ios::binary|std::ios::trunc);auto json=snapshot.json();json["previewSongName"]=std::filesystem::path(source).filename().string();json["previewInputOffsetSeconds"]=session.inputOffsetSeconds();out<<json.dump(2);out.close();if(!out)throw std::runtime_error("cannot create preview snapshot");std::string error;
         if(!launch||!launch(chart::utf8(file),error))throw std::runtime_error(error.empty()?"preview executable unavailable":error);
         message=L"横向独立试玩已启动 · D F J K · 编辑内容保留";
     }
@@ -327,13 +327,14 @@ public:
     }catch(const std::exception& ex){message=L"保存失败："+wide(ex.what());}}
     bool loadFile(const std::filesystem::path& file,bool asynchronous=false){try{if(busy())return false;const auto bytes=chart::read(file);const auto json=nlohmann::json::parse(bytes);auto next=chart::Document::fromJson(json);
         previewSongName=json.value("previewSongName",std::string{});
+        if(preview){inputOffset=json.value("previewInputOffsetSeconds",0.);if(!std::isfinite(inputOffset)||std::abs(inputOffset)>.5)throw std::runtime_error("invalid preview input compensation");}
         const auto audioFile=next.audioRelative?chart::containedPath(root(),next.audio):std::filesystem::u8path(next.audio);
         if(asynchronous){requestMusic(audioFile.string(),next,chart::utf8(file),bytes);return true;}
         if(!loadMusic(audioFile.string(),&next))return false;document=std::move(next);history={};judge.reset(document);canvas->selected=-1;lastFile=chart::utf8(file);lastBytes=bytes;dirty=false;
         if(bpm){bpm->setText(number(document.bpm));offset->setText(number(document.offset*1000));}message=L"谱面已载入";canvas->markDirty();return true;
     }catch(const std::exception& ex){message=L"谱面载入失败："+wide(ex.what());return false;}}
     void loadAsset(){try{const auto logical=narrow(path->getText());if(!logical.ends_with(".chart.json"))throw std::runtime_error("use .chart.json extension");loadFile(chart::containedPath(root(),logical),true);}catch(const std::exception& ex){message=L"谱面载入失败："+wide(ex.what());}}
-    void listen(){try{checkReady();stop();voice=bound->play(clip,AudioBus::Music);if(voice)bound->setVoicePositionFrames(voice,uint64_t(wave->position*bound->outputSampleRate()));message=L"正在试听音乐";}catch(const std::exception& ex){message=L"试听失败："+wide(ex.what());}}
+    void listen(){try{checkReady();stop();voice=bound->play(clip,AudioBus::Preview);if(voice)bound->setVoicePositionFrames(voice,uint64_t(wave->position*bound->outputSampleRate()));message=L"正在试听音乐";}catch(const std::exception& ex){message=L"试听失败："+wide(ex.what());}}
     void start(){try{checkReady();stop();judge.reset(document);epoch=std::chrono::steady_clock::now();leadIn=leadInChoice?(leadInChoice->getSelectedIndex()==0?0:leadInChoice->getSelectedIndex()==1?.5:2):.5;clock=canvas->now=-leadIn;running=countdown=true;message=L"准备 · D F J K";}catch(const std::exception& ex){message=L"运行失败："+wide(ex.what());}}
     double time(){
         if(paused)return pausedTime;if(countdown)return -leadIn+elapsed(epoch);
@@ -346,7 +347,7 @@ public:
     }
     void togglePause(){if(!running)return;if(!paused){pausedTime=time();paused=true;judge.held.fill(false);for(size_t i=0;i<judge.states.size();++i)if(judge.states[i]==chart::Judge::Holding){judge.finish(i,chart::Judge::Miss);judge.notify(i,chart::Judge::Miss,0,pausedTime,true);}if(valid() && voice)bound->setVoicePaused(voice,true);message=L"已暂停 · 点击继续或按 Esc";}
         else{paused=false;if(countdown)epoch=std::chrono::steady_clock::now()-std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(pausedTime+leadIn));else{anchor=pausedTime;frameEpoch=std::chrono::steady_clock::now();if(valid() && voice)bound->setVoicePaused(voice,false);}message=L"试玩继续";}}
-    bool key(int key,bool down){if(!preview)return false;if(key==27){if(down)togglePause();return true;}const std::string keys="DFJK";const auto index=keys.find(char(key));if(index==std::string::npos)return false;if(running && !paused && !countdown){judge.key(document,int(index),down,time());canvas->markDirty();}return true;}
+    bool key(int key,bool down){if(!preview)return false;if(key==27){if(down)togglePause();return true;}const std::string keys="DFJK";const auto index=keys.find(char(key));if(index==std::string::npos)return false;if(running && !paused && !countdown){judge.key(document,int(index),down,time()-inputOffset);canvas->markDirty();}return true;}
     void focusLost(){if(preview&&loading.valid())lostFocusDuringLoad=true;if(preview && running && !paused)togglePause();canvas->onCaptureCancelled();}
     void tick(){
         pollJobs();

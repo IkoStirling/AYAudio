@@ -787,3 +787,61 @@ paths or chart content. No force exit, detached jobs or shared-engine shutdown i
 AudioEngine::debugSnapshot owns coherent listener, active/paused voice, bus gain/peak and output observations under the existing audio state mutex. Mixer bus meters sum spatial/voice/bus/duck/master-gained dry samples per bus before measuring amplitude; destructive interference is preserved. The fixed preallocated meter scratch adds no callback allocation. Peaks exclude reverb and are not RMS/LUFS. Reset/silent blocks clear meters. Diagnostics never seek or consume voices.
 
 2026-10-16: rebuilt AYAudio_Tests and ran the full module suite: 174 selected, 172 passed, 2 explicit skips (opt-in WASAPI capture and absent optional MP3), 1379 assertions passed. Reset clears bus/output meters; paused or shut-down snapshots report zero bus peaks. No interactive editor acceptance is claimed. Raw report: out/audio-completion-20261016/baseline-native.json.
+
+## Audio processing, performance input and cooked content (2026-10-16)
+
+The Host AudioEngine now supports owner-thread SOFA profile binding and ordered
+bus insert chains. HrtfProfile reads SimpleFreeFieldHRIR with pinned libmysofa
+1.3.5; the callback runs persistent stereo HRIR convolution and receiver delay.
+Spatialization parameters drive continuous occlusion/air low-pass filtering.
+Each bus accepts up to eight low/high-pass, peak EQ, stereo-linked compressor,
+feedback delay or limiter effects. Master inserts follow reverb. Preview is an
+independent bus appended after Voice; existing enum values remain stable.
+Legacy debug rows remain five entries; allBusGains/allBusPeaks include Preview.
+
+MidiInput enumerates and opens Windows MIDI 1 short-message inputs. Its bounded
+callback ring is drained on the owner thread. Workbench note/velocity, sustain
+and channel gates coexist with keyboard/mouse notes; overflow and focus loss
+release notes and disconnect. The recording page can measure a known probe's
+round-trip lag. This cannot separate input/output hardware latency. User input
+compensation is saved with instrument presets and used for notes/pedals and
+chart-preview judgement. Instrument and mixer presets save to editable project
+asset paths, reject escapes/unknown overwrites/external changes and load only
+after validation. Mixer presets include ordered effects and Preview gain.
+
+Performance/chart source models and the offline renderer are shared with
+AYResource authoring. Standard Import/ProjectBuild compiles .performance.json
+and .chart.json into self-contained .acb PCM/timed-event bundles. User sample
+references must stay inside Assets; dependencies and built-in piano samples
+participate in cache identity and execution revalidation. ResourceManager loads
+loose or Pak AudioContent. AudioContentPlayer owns its clip/voice and an event
+snapshot; poll update after playback, pause/seek explicitly, clear before engine
+destruction or abandon after host replacement. No scoring/input policy is added.
+Sample attribution stays inside the bundle and ProjectBuild writes readable credits.
+
+Limits: 1024 HRIR taps/ear, receiver delay <2047 frames, 64 MiB SOFA; direct FIR
+cost grows with voices/taps and remains subject to the existing state-gate
+silence-on-contention policy. Chains allocate on configuration, never in render;
+delay <=2 s. MIDI hardware is Windows-only, no SysEx/UMP. Content uses fixed BPM,
+<=100000 compiled events, <=600 s/256 MiB PCM and <=16 MiB metadata. The player
+has no loop/dynamic arrangement mode. Resource-page audio export/arbitrary
+volume envelopes and device-capture multitrack editing remain outside these additions.
+
+Build/check AYAudio_Tests, AYAudio_AuthoringTests, AYResource_Tests
+(AudioContentTests), AYAssetFormat_Tests and the shared editor hosts.
+Set AY_AUDIO_SOFA_TEST_FILE to a licensed fixture for real SOFA checks; hardware
+acceptance is distinct from deterministic tests. Implementation/evidence and
+gameplay acquisition contracts: AYDocs/sdk/contracts/audio.md.
+Distribute thirdparty/libmysofa/LICENSE and SPEEX-LICENSE.txt with linked binaries;
+the Audio Editor build/product stages both notices beside its assets.
+
+Validation (Windows Debug, 2026-10-16): AYAudio_Tests selected 185, passed 184,
+skipped 1 (absent optional Evening_wanders.mp3), 3541 assertions; real MIT KEMAR
+SOFA and both WASAPI device cases executed. Final probe route lag 197.625 ms,
+correlation 0.773900, zero dropped frames; this includes callback/route buffering,
+not isolated one-way hardware latency. AYAudio_AuthoringTests passed 4/4 (28 checks),
+AYEditor audio/chart/performance integration passed 19/19 (833 checks). Both editor
+hosts built. Reports: out/audio-completion-20261016/{audio-accepted,
+authoring-accepted,editor-accepted}.json. No physical MIDI keyboard or manual GUI
+acceptance is claimed. The device fixture was corrected to warm output before
+capture; Workbench subtracts recorded pre-roll before correlating its probe.

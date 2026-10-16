@@ -15,6 +15,7 @@
 
 #include <AYCore.h>
 #include <AYAudio/AudioTypes.h>
+#include <AYAudio/AudioProcessing.h>
 #include <array>
 #include <cstdint>
 #include <vector>
@@ -56,8 +57,11 @@ public:
     float getBusGain(AudioBus bus) const;
     float getMasterGain() const { return _masterGain; }
     AudioOutputLevels outputLevels() const { return _outputLevels; }
-    /// Last dry bus sum after voice/bus/duck/master gain, before reverb and clamping.
+    /// Last dry bus sum after voice/bus/duck/master gain and child-bus inserts.
+    /// Excludes reverb and Master inserts; final outputLevels includes both.
     const auto& busPeaks() const noexcept { return _busPeaks; }
+    bool setBusEffects(AudioBus bus,const std::vector<AudioEffect>& effects,std::string* error=nullptr);
+    std::vector<AudioEffect> busEffects(AudioBus bus) const;
 
     // ===== Ducking (v2.0b) =====
     void setDucking(float depthDb, float attackPerSec, float releasePerSec);
@@ -111,6 +115,7 @@ private:
     void _processReverbWet(const float* sendBuffer, float* output, uint32_t frames);
 
     std::array<float,static_cast<size_t>(AudioBus::Count)> _busPeaks{};
+    std::array<AudioEffectChain,static_cast<size_t>(AudioBus::Count)> _effects;
     std::array<std::array<float,8192>,static_cast<size_t>(AudioBus::Count)> _busMeterSamples{};
     std::array<BusState, static_cast<size_t>(AudioBus::Count)> _buses{};
     float _masterGain = 1.0f;

@@ -11,6 +11,7 @@
 #include <array>
 #include <memory>
 #include <AYAudio/SampleInstrument.h>
+#include <AYAudio/MidiInput.h>
 #include <functional>
 #include <string>
 #include <vector>
@@ -71,6 +72,7 @@ public:
     // Input-boundary monotonic clock, injectable for deterministic authoring tests.
     void setPerformanceClock(std::function<double()> clock) { _performanceClock=std::move(clock); }
     double performanceTime() const;
+    double inputOffsetSeconds()const { return _inputOffsetSeconds; }
     uint32_t uiModifiers() const;
     const std::string& builtinAudioAssets() const { return _assetRoot; }
     void setChartPreviewFile(std::string path) { _chartPreviewFile=std::move(path); }
@@ -78,6 +80,8 @@ public:
     void setChartLauncher(ChartLauncher launcher) { _chartLauncher=std::move(launcher); }
     ayt::math::FRectangle pianoKeyBounds(int note) const;
     void releaseKeys();
+    /// Owner-thread MIDI delivery; velocities and device timestamps feed the performance recorder.
+    void handleMidiEvent(const MidiEvent& event);
     void setAssetRoot(std::string root) { _assetRoot=std::move(root); }
     bool isAttached() const { return _ui != nullptr; }
     AudioRecorder* recorder() const;
@@ -92,10 +96,14 @@ private:
     struct Workbench;
     std::unique_ptr<Workbench> _workbench;
     void pressPitch(int pitch, bool keyboard, bool down);
+    bool pitchHeld(int pitch) const;
+    bool sustainHeld() const;
+    double _inputOffsetSeconds=0;
     bool ensureClips();
     void releaseResources();
     void buildInstrument(bool sine = false);
     void loadSample();
+    bool loadSamplePath(const std::string& path,int root);
     void updateKeys();
     void stopOwned();
     void pressNote(int index, bool keyboard, bool down);
@@ -107,6 +115,8 @@ private:
     std::vector<AudioClipId> _instrumentClips;
     std::vector<VoiceHandle> _ownedVoices;
     std::array<bool,128> _keyboard{}, _mouse{};
+    std::array<std::array<bool,128>,16> _midi{};
+    std::array<bool,16> _midiPedal{};
     std::array<int,256> _keyPitches;
     bool _leftShift=false, _leftAlt=false;
     int _mouseKey=-1, _octave=4;

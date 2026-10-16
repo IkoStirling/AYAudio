@@ -67,6 +67,7 @@ bool AudioMixer::initialize(uint32_t maxVoices, uint16_t outputChannels, uint32_
 
     _duck = DuckingState{};
     _busPeaks.fill(0);
+    for(auto& chain:_effects) chain.configure({},sampleRate);
 
     // v2.0b: size reverb delay lines from the active preset. Clamp the
     // preset index so a caller-supplied garbage value falls back to 0.
@@ -114,6 +115,7 @@ bool AudioMixer::initialize(uint32_t maxVoices, uint16_t outputChannels, uint32_
 void AudioMixer::reset() {
     _busPeaks.fill(0);
     _outputLevels = {};
+    for(auto& chain:_effects) chain.reset();
     _masterGain = 1.0f;
     for (auto& bus : _buses) {
         bus.gain = 1.0f;
@@ -225,6 +227,14 @@ float AudioMixer::getBusGain(AudioBus bus) const {
     return _buses[idx].gain;
 }
 
+bool AudioMixer::setBusEffects(AudioBus bus,const std::vector<AudioEffect>& effects,std::string* error){
+    const size_t i=static_cast<size_t>(bus);if(i>=_effects.size()){if(error)*error="invalid audio bus";return false;}
+    return _effects[i].configure(effects,_sampleRate,error);
+}
+std::vector<AudioEffect> AudioMixer::busEffects(AudioBus bus)const{
+    const size_t i=static_cast<size_t>(bus);return i<_effects.size()?_effects[i].configuration():std::vector<AudioEffect>{};
+}
+
 const BusState& AudioMixer::getBusState(AudioBus bus) const {
     const size_t idx = static_cast<size_t>(bus);
     if (idx >= _buses.size()) {
@@ -308,17 +318,6 @@ void AudioMixer::mix(float* output,
                 _duck.activeBusMask |= (1u << busIdx);
             }
 
-            if (_outputChannels == 1) {
-                for (uint32_t f = 0; f < outputFrames; ++f) {
-                    output[f] += scratch[f] * totalGain;
-                }
-            } else {
-                for (uint32_t f = 0; f < outputFrames; ++f) {
-                    output[2 * f + 0] += scratch[2 * f + 0] * totalGain;
-                    output[2 * f + 1] += scratch[2 * f + 1] * totalGain;
-                }
-            }
-
             // v2.0b reverb send: if the voice wants a non-zero send, copy a
             // scaled version of its (spatial-gain-applied) dry signal into
             // the wet-send accumulator. We scale by bus gain + voice volume
@@ -342,8 +341,14 @@ void AudioMixer::mix(float* output,
         }
     }
 
-    for(size_t bus=0;bus<_busPeaks.size();++bus) for(uint32_t sample=0;sample<outputFrames*_outputChannels;++sample)
-        _busPeaks[bus]=std::max(_busPeaks[bus],std::abs(_busMeterSamples[bus][sample]));
+    for(size_t bus=0;bus<_busPeaks.size();++bus) {
+        auto* samples=_busMeterSamples[bus].data();
+        if(bus!=size_t(AudioBus::Master))_effects[bus].process(samples,outputFrames,_outputChannels);
+        for(uint32_t sample=0;sample<outputFrames*_outputChannels;++sample) {
+            _busPeaks[bus]=std::max(_busPeaks[bus],std::abs(samples[sample]));
+            output[sample]+=samples[sample];
+        }
+    }
 
     // Process the wet-send accumulator through the Schroeder network and
     // mix the result into output. Stereo only — mono paths skip reverb
@@ -351,6 +356,7 @@ void AudioMixer::mix(float* output,
     if (_outputChannels == 2 && !_reverbSendBuffer.empty()) {
         _processReverbWet(_reverbSendBuffer.data(), output, outputFrames);
     }
+    _effects[size_t(AudioBus::Master)].process(output,outputFrames,_outputChannels);
 
     // Clamp once per output frame to prevent inter-voice summation from
     // exceeding [-1, +1] (which would otherwise clip in the DAC).

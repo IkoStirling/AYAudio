@@ -436,6 +436,48 @@ struct AudioEditorSession::Workbench
     };
     std::vector<Gain> gains;
     AudioRecorder recorder;
+    #include "AudioWorkbenchExtensions.inl"
+    MidiInput midi;
+    Combo* midiDevices=nullptr;
+    std::vector<MidiDevice> midiPorts;
+    uint64_t midiDropped=0;
+    TextInput *instrumentPresetPath=nullptr,*mixerPresetPath=nullptr,*latencyOffset=nullptr;
+    std::map<std::string,std::string> presetBaselines;
+    std::string presetRead(TextInput* path) {
+        const auto file=chart::containedPath(recordingRoot(),utf8(path->getText()));const auto bytes=chart::read(file);
+        presetBaselines[chart::utf8(file)]=bytes;return bytes;
+    }
+    void presetWrite(TextInput* path,const nlohmann::json& document) {
+        const auto file=chart::containedPath(recordingRoot(),utf8(path->getText()));const auto key=chart::utf8(file);
+        if(std::filesystem::exists(file)&&(!presetBaselines.contains(key)||chart::read(file)!=presetBaselines[key]))throw std::runtime_error("load this preset first; file is unknown or changed externally");
+        std::filesystem::create_directories(file.parent_path());const auto bytes=document.dump(2)+"\n";
+        if(!ayt::io::File::atomicWrite(key,bytes.data(),bytes.size()))throw std::runtime_error("cannot save preset");presetBaselines[key]=bytes;if(s._recordingSaved)s._recordingSaved(key);
+    }
+    void saveInstrumentPreset(){try {authoring::InstrumentPreset preset;preset.instrument.kind=s._performanceSampleSource.empty()?(s._sine?"sine":"piano"):"sample";preset.instrument.source=s._performanceSampleSource;preset.instrument.root=s._performanceSampleRoot;preset.instrument.gain=s._previewGain;preset.instrument.attack=attack;preset.instrument.release=release;preset.inputOffset=s._inputOffsetSeconds;
+        if(preset.instrument.kind=="sample"){try{const auto file=std::filesystem::weakly_canonical(std::filesystem::u8path(preset.instrument.source)),root=std::filesystem::weakly_canonical(std::filesystem::u8path(recordingRoot()));const auto rel=std::filesystem::relative(file,root);chart::containedPath(recordingRoot(),chart::utf8(rel));preset.instrument.source=chart::utf8(rel);preset.instrument.relative=true;}catch(...){} }
+        presetWrite(instrumentPresetPath,preset.json());s.setStatus(L"演奏预设已保存");}catch(const std::exception& e){s.setStatus(wide(e.what()));}}
+    void loadInstrumentPreset(){try{const auto p=authoring::InstrumentPreset::fromJson(nlohmann::json::parse(presetRead(instrumentPresetPath)));const auto& i=p.instrument;if(performance&&performance->busy())throw std::runtime_error("stop performance transport before loading a preset");
+        if(i.kind=="sample"){const auto source=i.relative?chart::utf8(chart::containedPath(recordingRoot(),i.source)):i.source;if(!s.loadSamplePath(source,i.root))throw std::runtime_error("cannot load preset sample");}
+        else{if(!s.ensureClips())throw std::runtime_error("audio engine is unavailable");s.buildInstrument(i.kind=="sine");s._performanceSampleSource.clear();}
+        s._previewGain=i.gain;attack=i.attack;release=i.release;s._inputOffsetSeconds=p.inputOffset;envelopeFields->setValues({attack*1000,release*1000});latencyOffset->setText(workbench::number(p.inputOffset*1000,1));applyInstrument();s.updateKeys();s.setStatus(L"演奏预设已载入");
+        }catch(const std::exception& e){s.setStatus(wide(e.what()));}}
+    void buildPresets(VBox* parent,bool mixer){using namespace workbench;auto* r=row(parent);auto* field=new TextInput();field->setId(mixer?"mixer_preset_path":"instrument_preset_path");field->setText(mixer?L"audio/presets/mixer.json":L"audio/presets/instrument.json");r->addWidget(field,300);
+        if(mixer)mixerPresetPath=field;else instrumentPresetPath=field;
+        button(r,L"保存预设",mixer?"mixer_preset_save":"instrument_preset_save",[this,mixer]{if(!mixer){saveInstrumentPreset();return;}try{auto* e=s.liveEngine();if(!e)throw std::runtime_error("audio engine is unavailable");presetWrite(mixerPresetPath,authoring::MixerPreset::capture(*e).json());s.setStatus(L"混音预设已保存");}catch(const std::exception& e){s.setStatus(wide(e.what()));}},90);
+        button(r,L"载入预设",mixer?"mixer_preset_load":"instrument_preset_load",[this,mixer]{if(!mixer){loadInstrumentPreset();return;}try{auto* e=s.liveEngine();if(!e)throw std::runtime_error("audio engine is unavailable");authoring::MixerPreset::fromJson(nlohmann::json::parse(presetRead(mixerPresetPath))).apply(*e);refreshEffects();s.setStatus(L"混音预设已载入");}catch(const std::exception& e){s.setStatus(wide(e.what()));}},90);
+    }
+    void refreshMidi() {
+        midi.close();s.releaseKeys();midiPorts=MidiInput::enumerateDevices();std::vector<std::wstring> names;
+        for(const auto& port:midiPorts)names.push_back(wide(port.name));if(names.empty())names.push_back(L"未发现 MIDI 输入设备");
+        midiDevices->setItems(names);midiDevices->setSelectedIndex(0);
+    }
+    void buildMidi(VBox* parent) {
+        auto* r=workbench::row(parent);r->addWidget(workbench::label(L"MIDI 输入"),80);
+        midiDevices=new Combo();midiDevices->setId("midi_device");r->addWidget(midiDevices,240);
+        workbench::button(r,L"刷新","midi_refresh",[this]{refreshMidi();},66);
+        workbench::button(r,L"连接","midi_connect",[this]{s.releaseKeys();const int i=midiDevices->getSelectedIndex();std::string error;if(i<0||i>=int(midiPorts.size())||!midi.open(midiPorts[i].id,&error))s.setStatus(wide(error.empty()?"no MIDI device selected":error));else{s.setStatus(L"MIDI 已连接 · 失焦会断开以释放音符");midiDropped=0;}},70);
+        workbench::button(r,L"断开","midi_disconnect",[this]{midi.close();s.releaseKeys();},70);refreshMidi();
+    }
     std::vector<RecordingDevice> recordingDevices;
     std::vector<std::string> inputIds, outputIds;
     Combo *recordSource=nullptr,*recordInput=nullptr,*recordOutput=nullptr;
@@ -558,6 +600,7 @@ struct AudioEditorSession::Workbench
         recordEdit=button(actions,L"在音频资源中编辑","recording_edit",[this]{
             if(!lastSavedRecording.empty() && loadResource(lastSavedRecording)) tabs->setSelectedIndex(1);
         },175);
+        button(actions,L"测量往返延迟","audio_latency_measure",[this]{beginCalibration();},130);
         actions->addWidget(label(L"WAV · 48 kHz / 16-bit · 滚轮缩放波形"));
         page->addWidget(label(L"未保存录音需先保存或丢弃再开始新录音；关闭窗口会停止录音并释放设备。"),28);
         inputIds={""};outputIds={""};
@@ -609,8 +652,8 @@ struct AudioEditorSession::Workbench
     nlohmann::json sidecar;
     static AudioBus bus(int index)
     {
-        static constexpr AudioBus values[] = {AudioBus::Sfx, AudioBus::Music, AudioBus::Ui, AudioBus::Voice};
-        return values[std::clamp(index, 0, 3)];
+        static constexpr AudioBus values[] = {AudioBus::Sfx, AudioBus::Music, AudioBus::Ui, AudioBus::Voice,AudioBus::Preview};
+        return values[std::clamp(index, 0, 4)];
     }
     Gain addGain(VBox *parent, const std::wstring &name, const std::string &id, float min, float max, float value,
                  std::function<float()> read, std::function<void(float)> write, float scale = 100)
@@ -660,8 +703,8 @@ struct AudioEditorSession::Workbench
     {
         auto *c = new Combo();
         c->setId(id);
-        c->setItems({L"音效 · SFX", L"音乐 · Music", L"界面音 · UI", L"语音 · Voice"});
-        c->setSelectedIndex(0);
+        c->setItems({L"音效 · SFX", L"音乐 · Music", L"界面音 · UI", L"语音 · Voice",L"编辑器试听 · Preview"});
+        c->setSelectedIndex(4);
         c->setOnSelectionChanged(std::move(callback));
         r->addWidget(c, 200);
         return c;
@@ -751,10 +794,13 @@ struct AudioEditorSession::Workbench
             applyInstrument();
         });
         p->addWidget(preset, 180);
-        auto *save = button(p, L"保存预设（待实现）", "instrument_preset_save", [] {}, 190);
-        save->setEnabled(false);
+        buildPresets(parameters,false);
         instrument = label(L"Salamander Grand Piano", "lbl_instrument");
         parameters->addWidget(instrument, 28);
+        buildMidi(parameters);
+        auto* latency=row(parameters);latency->addWidget(label(L"输入补偿 ms（正值提前记录）"),220);latencyOffset=new TextInput();latencyOffset->setId("audio_input_offset_ms");latencyOffset->setText(L"0");latency->addWidget(latencyOffset,80);
+        auto applyLatency=[this]{try{s._inputOffsetSeconds=std::clamp(parse(latencyOffset->getText())*.001,-.5,.5);latencyOffset->setText(number(s._inputOffsetSeconds*1000,1));}catch(...){latencyOffset->setText(number(s._inputOffsetSeconds*1000,1));}};
+        latencyOffset->setOnSubmit([applyLatency](const std::wstring&){applyLatency();});latencyOffset->setOnFocusLostNotify(applyLatency);
         auto *source = row(parameters);
         button(
             source, L"钢琴 / 正弦波", "btn_instrument",
@@ -856,7 +902,7 @@ struct AudioEditorSession::Workbench
                 if (!s.ensureClips())
                     return;
                 s._pedalLatch = !s._pedalLatch;
-                s._instrument->setSustain(s._spaceDown || s._pedalLatch);
+                s._instrument->setSustain(s.sustainHeld());
                 if(this->performance)this->performance->sustain(s._spaceDown || s._pedalLatch);
                 s.updateKeys();
             },
@@ -870,7 +916,7 @@ struct AudioEditorSession::Workbench
             if (down) { s._mouseKey=n+s.effectiveTranspose();s.pressPitch(s._mouseKey,false,true); }
             else if (s._mouseKey>=0) { const int pitch=s._mouseKey;s._mouseKey=-1;s.pressPitch(pitch,false,false); }
         };
-        piano->isDown = [this](int n) { return n >= 0 && n < 128 && (s._keyboard[n] || s._mouse[n]); };
+        piano->isDown = [this](int n) { return s.pitchHeld(n); };
         pianoPane->addWidget(piano, 160);
         noteStatus = label(L"Q W E R T Y U I / A S D F G H J K / Z X C V B N M , · Alt 升半音", "note_status");
         pianoPane->addWidget(noteStatus, 22);
@@ -1061,8 +1107,9 @@ struct AudioEditorSession::Workbench
                 if (auto *e = s.liveEngine())
                     e->setMasterReverbReturn(v);
             });
-        placeholder(mixer, L"独立编辑器试听分组（待实现）");
-        placeholder(mixer, L"另存项目混音预设（待实现）");
+        addGain(mixer,L"编辑器试听 · Preview","preview",0,150,100,[this]{auto* e=s.liveEngine();return e?e->busGain(AudioBus::Preview):1;},[this](float value){if(auto* e=s.liveEngine())e->setBusGain(AudioBus::Preview,value);});
+        buildPresets(mixer,true);
+        buildEffects(mixer);
         buildRecordingPage();
         auto* chartPage=new VBox();chartPage->setPadding(12,14,12,8);chartPage->setSpacing(8);
         addPage(L"谱面编辑",chartPage);buildChart(chartPage,false);
@@ -1079,6 +1126,7 @@ struct AudioEditorSession::Workbench
     {
         recorder.stop();
         recorder.stopPlayback();
+        clearCalibration();
         releaseAudio();
         performance.reset();
         if (host && root)
@@ -1358,10 +1406,13 @@ struct AudioEditorSession::Workbench
     }
     void tick(float dt)
     {
+        if(midi.droppedEvents()!=midiDropped){s.releaseKeys();midiDropped=midi.droppedEvents();s.setStatus(L"MIDI 队列溢出，已释放音符，请重新连接");midi.close();}
+        MidiEvent event;for(size_t count=0;count<1024&&midi.poll(event);++count)s.handleMidiEvent(event);
         if(chart) chart->tick();
         if(!s._chartPreviewFile.empty()) return;
         if(performance) performance->tick();
         tickRecording();
+        tickCalibration();
         updating = true;
         for (auto &g : gains)
         {

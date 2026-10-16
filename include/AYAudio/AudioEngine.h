@@ -24,6 +24,7 @@
 #include <AYAudio/AudioCommandQueue.h>
 #include <AYAudio/AudioMixer.h>
 #include <AYAudio/AudioSpatializer.h>
+#include <AYAudio/AudioProcessing.h>
 #include <AYAudio/AudioClipRegistry.h>
 
 #include <AYAudio/IAudioBackend.h>
@@ -44,7 +45,10 @@ class AudioEngine {
 public:
     struct DebugSnapshot {
         ListenerParams listener; std::vector<VoiceRuntime> voices;
-        std::array<float,static_cast<size_t>(AudioBus::Count)> busGains{},busPeaks{};
+        // Stable legacy rows (Master..Voice) for existing five-row diagnostic consumers.
+        std::array<float,static_cast<size_t>(AudioBus::Voice)+1> busGains{},busPeaks{};
+        /// Complete current taxonomy, including Preview. Index with AudioBus.
+        std::array<float,static_cast<size_t>(AudioBus::Count)> allBusGains{},allBusPeaks{};
         AudioOutputLevels output; float masterGain=0; bool paused=false;
     };
     /// One coherent owned owner-thread observation, guarded against the audio callback.
@@ -114,6 +118,11 @@ public:
 
     void setBusGain(AudioBus bus, float linearGain);
     void setMasterGain(float linearGain);
+    /// Owner-thread ordered insert chain; Master runs after reverb. Invalid config preserves state.
+    bool setBusEffects(AudioBus bus, const std::vector<AudioEffect>& effects, std::string* error=nullptr);
+    std::vector<AudioEffect> busEffects(AudioBus bus) const;
+    /// Own a prepared SOFA profile matching the engine rate; nullptr restores lightweight spatialization.
+    bool setHrtfProfile(std::shared_ptr<HrtfProfile> profile);
 
     // ===== Listener =====
 
@@ -243,6 +252,7 @@ private:
     VoiceHandle _allocateVoiceIndex(uint32_t slotIdx);
 
     void _applyCommand(const AudioCommand& cmd);
+    void prepareVoiceProcessing();
     void _resolveVoice(AudioClipId clip,
                        AudioBus bus,
                        const SpatializationParams& spatial,
@@ -281,6 +291,8 @@ private:
 
     // Dense voice pool. Opaque monotonic handles are resolved by identity, never by index.
     std::vector<VoiceRuntime> _voices;
+    std::vector<AudioVoiceProcessor> _voiceProcessors;
+    std::shared_ptr<HrtfProfile> _hrtfProfile;
     uint32_t _voiceCapacity = 0;
     // Monotonic voice identity assigned at play() / playStream() time.
     // It survives initialize/shutdown cycles so stale handles cannot control
