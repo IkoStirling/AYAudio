@@ -5,6 +5,11 @@
 > before L/R pan. Queued speech may hold its cursor on underflow via
 > `advanceClockOnUnderrun=false`, while video retains the advancing default.
 > [Host composition and tests](playback/README.md).
+>
+> 2026-10-26: OutputDiagnostics is a separate read-only OS observation, with owned
+> values and no mixer mutation/recording. Only the caller's single-process sessions
+> are attributed; missing channels/sessions remain unknown. It runs on a non-render
+> worker and never proves user audibility. [Contract](../../AYDocs/sdk/contracts/audio-output.md).
 
 **Status:** Living document — runtime audio module (not asset import)  
 **Last revised:** 2026-07-11  

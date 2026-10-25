@@ -22,3 +22,9 @@ the producer is done. This does not replace producer queue budgets or cancellati
 clip resampling and repeated lifecycle teardown using a deterministic Null device.
 `AYAudio_PanTests` covers the gain curve, bounds and non-finite inputs. Physical
 device audibility and latency remain integration/manual checks.
+
+`queryProcessOutput()` adds a read-only Windows default-endpoint/own-session
+snapshot. It is independent of playback initialization, never changes mute/volume
+or devices, and uses explicit unknown fields. Run it on a separate non-render
+worker; other platforms return Unsupported. `AYAudioOutput_Tests` verifies bounded
+observations, own-process filtering, caller COM apartment and native-handle cleanup.

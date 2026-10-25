@@ -2,6 +2,13 @@
 
 Runtime presentation audio for AY Engine (mixing, spatialization, device output).
 
+Read-only Windows output diagnostics are available through
+`queryProcessOutput()` in `AYAudio/OutputDiagnostics.h`, linked with AYAudioPlayback
+or AYAudio. It observes default render endpoints and only this process's audio
+sessions, with explicit unknown values and bounded enumeration. It never changes
+volume/device settings or records audio; call off the render/UI path. Other
+platforms report Unsupported. See [the contract](../../AYDocs/sdk/contracts/audio-output.md).
+
 Lightweight device-independent stereo panning is also available without the
 Runtime, math library or backend: add `AYAudio/pan` and link `AYAudioPan`, then
 include `AYAudio/StereoPan.h`. See [its contract](../../AYDocs/sdk/contracts/audio-pan.md).

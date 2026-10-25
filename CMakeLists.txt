@@ -40,6 +40,7 @@ set(HEAD_FILES
     include/AYAudio/AudioCommandQueue.h
     include/AYAudio/AudioComponents.h
     include/AYAudio/AudioEngine.h
+    include/AYAudio/OutputDiagnostics.h
     include/AYAudio/AudioRecorder.h
     include/AYAudio/SampleInstrument.h
     include/AYAudio/AudioEmitterSystem.h
