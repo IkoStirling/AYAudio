@@ -187,6 +187,9 @@ struct AudioStreamDesc {
                                       // Default ~340ms @ 48kHz stereo.
     bool loop = false;                // voice-stops-at-drain semantics even
                                       // if loop=true; producer owns re-push.
+    /// Media clocks may advance through silence; speech queues can instead keep
+    /// their source cursor fixed until PCM arrives. Underflow then emits silence.
+    bool advanceClockOnUnderrun = true;
 };
 
 // ===== Per-voice runtime state (CPU side) =====

@@ -5,24 +5,16 @@ project(AYAudio
 )
 
 set(MODULE_NAME AYAudio)
-add_subdirectory(thirdparty/libmysofa)
+add_subdirectory(playback)
 
 # Core engine sources
 set(SRC_FILES
-    src/AYAudioBackendFactory.cpp
-    src/AYAudioClipRegistry.cpp
-    src/AYAudioCommandQueue.cpp
     src/AYAudioComponents.cpp
-    src/AYAudioEngine.cpp
     src/AYAudioRecorder.cpp
     src/AYAudioSampleInstrument.cpp
     src/AYAudioEmitterSystem.cpp
-    src/AYAudioMixer.cpp
-    src/AYAudioProcessing.cpp
     src/AYAudioContentPlayer.cpp
     src/AYAudioMidiInput.cpp
-    src/AYAudioSpatializer.cpp
-    src/AYAudioStreamRingBuffer.cpp
     src/AYAudioSubSystem.cpp
     src/AYAudioRuntimeModule.cpp
 )
@@ -30,9 +22,6 @@ set(SRC_FILES
 # Backends. Null + Mock are CPU-only; MiniaudioBackend talks to the
 # default OS audio device via miniaudio (header-only vcpkg port).
 set(BACKEND_FILES
-    backend/NullBackend.cpp
-    backend/MockBackend.cpp
-    backend/MiniaudioBackend.cpp
 )
 
 # Backend-internal headers (kept under backend/ so they don't leak out of
@@ -90,7 +79,7 @@ if(NOT MINIAUDIO_INCLUDE_DIRS)
 endif()
 
 add_library(${MODULE_NAME} STATIC ${SRC_FILES} ${BACKEND_FILES} ${BACKEND_HEADERS} ${HEAD_FILES})
-target_link_libraries(${MODULE_NAME} PRIVATE AYAudio_MySofa)
+target_link_libraries(${MODULE_NAME} PUBLIC AYAudioPlayback)
 
 target_include_directories(${MODULE_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}

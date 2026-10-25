@@ -61,6 +61,7 @@ struct StreamSourceContext {
     uint16_t srcChannels = 2;
     bool loop = false;
     bool finished = false;
+    bool advanceClockOnUnderrun = true;
 
     // Cumulative source frames successfully drained from the ring since
     // playStream(). Written back to VoiceRuntime::positionFrames after
@@ -113,8 +114,8 @@ void renderVoicePcm(void* userData, uint32_t, float* buffer, uint32_t frames) {
             gain = std::min(1.0f, static_cast<float>(end - pos) / ctx.fadeOut);
         for (uint16_t c = 0; c < 2; ++c) {
             const uint16_t sc = d.channels == 1 ? 0 : c;
-            const float spatial = d.channels == 1 ? ctx.gains.monoGain
-                : (c == 0 ? ctx.gains.leftGain : ctx.gains.rightGain);
+            // Scratch is stereo even for mono sources; pan after duplication.
+            const float spatial = c == 0 ? ctx.gains.leftGain : ctx.gains.rightGain;
             buffer[2*f+c] = (sample(pos,sc) + (sample(next,sc)-sample(pos,sc))*t) * spatial * gain;
         }
         ctx.fractionalAccum += ctx.effectiveScale;
@@ -133,7 +134,7 @@ static bool pullOneFrame(StreamSourceContext& ctx, float* out) {
         // Still advance the media cursor: AudioMaster sync (AYVideo) must
         // keep moving through silence, otherwise video freezes waiting for
         // PCM that has not arrived yet.
-        ++ctx.positionFrames;
+        if(ctx.advanceClockOnUnderrun)++ctx.positionFrames;
         return false;
     }
     ++ctx.positionFrames;
@@ -188,7 +189,7 @@ void renderVoiceStream(void* userData,
             if (!pullOneFrame(*ctx, outFrame)) {
                 // Underrun mid-block — hold the last sample and on a fresh
                 // voice (no hasLast) emit silence.
-                if (!ctx->hasLast) {
+                if (!ctx->hasLast || !ctx->advanceClockOnUnderrun) {
                     outFrame[0] = 0.0f;
                     outFrame[1] = 0.0f;
                 } else {
@@ -203,8 +204,8 @@ void renderVoiceStream(void* userData,
             ctx->fractionalAccum -= static_cast<double>(wholeSteps);
         }
 
-        const float l = outFrame[0] * (ch == 1 ? monoGain : leftGain);
-        const float r = outFrame[1] * (ch == 1 ? monoGain : rightGain);
+        const float l = outFrame[0] * leftGain;
+        const float r = outFrame[1] * rightGain;
         voiceBuffer[2 * f + 0] = l;
         voiceBuffer[2 * f + 1] = r;
     }
@@ -1108,6 +1109,7 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
             sctx.ring = sslot->ring.get();
             sctx.gains = gains;
             sctx.srcChannels = sslot->desc.channels;
+            sctx.advanceClockOnUnderrun = sslot->desc.advanceClockOnUnderrun;
             sctx.loop = slot.loop;
             sctx.finished = false;
             // Carry the cumulative source-frame cursor across render blocks

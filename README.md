@@ -2,6 +2,10 @@
 
 Runtime presentation audio for AY Engine (mixing, spatialization, device output).
 
+Lightweight device-independent stereo panning is also available without the
+Runtime, math library or backend: add `AYAudio/pan` and link `AYAudioPan`, then
+include `AYAudio/StereoPan.h`. See [its contract](../../AYDocs/sdk/contracts/audio-pan.md).
+
 - **Design:** [design.md](design.md)
 - **Backend:** miniaudio (not OpenAL, not SDL_audio)
 - **Assets:** runtime mixes **PCM only**. Authoring uses common formats (WAV/MP3/OGG) via **AYResource** decode; cook to `.ayaudio` PCM for ship / optimize (design §2.3 lock).
@@ -281,3 +285,8 @@ hosts built. Reports: out/audio-completion-20261016/{audio-accepted,
 authoring-accepted,editor-accepted}.json. No physical MIDI keyboard or manual GUI
 acceptance is claimed. The device fixture was corrected to warm output before
 capture; Workbench subtracts recorded pre-roll before correlating its probe.
+# Standalone playback core
+
+Desktop hosts may link `AYAudioPlayback` without ECS, resources or GameLoop.
+See [playback](playback/README.md) for dependencies, mono stereo direction, queued
+speech underflow behavior and focused tests. The full AYAudio target reuses it.

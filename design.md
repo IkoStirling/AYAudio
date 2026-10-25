@@ -1,5 +1,11 @@
 # AYAudio — Design (v1.0)
 
+> 2026-10-25: the existing device/mixer/stream core is available as
+> `AYAudioPlayback`; AYAudio adds its integration wrappers. Mono PCM is duplicated
+> before L/R pan. Queued speech may hold its cursor on underflow via
+> `advanceClockOnUnderrun=false`, while video retains the advancing default.
+> [Host composition and tests](playback/README.md).
+
 **Status:** Living document — runtime audio module (not asset import)  
 **Last revised:** 2026-07-11  
 **Owner:** Engine / presentation systems

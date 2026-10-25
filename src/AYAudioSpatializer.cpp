@@ -1,4 +1,5 @@
 #include <AYAudio/AudioSpatializer.h>
+#include <AYAudio/StereoPan.h>
 
 #include <algorithm>
 #include <cmath>
@@ -26,10 +27,9 @@ void AudioSpatializer::equalPowerPan(float pan, float& leftGain, float& rightGai
     // Map pan [-1, +1] to angle [-π/4, +π/4] for equal-power stereo:
     //   L = cos(θ + π/4), R = sin(θ + π/4), where θ ∈ [-π/4, +π/4].
     // At pan=0 we get L=R≈0.707 (-3 dB center).
-    float clamped = clampf(pan, -1.0f, 1.0f);
-    float angle = clamped * kHalfPi * 0.5f + kHalfPi * 0.5f;
-    leftGain  = std::cos(angle);
-    rightGain = std::sin(angle);
+    const auto gains = equalPowerStereoPan(pan);
+    leftGain = gains.left;
+    rightGain = gains.right;
 }
 
 float AudioSpatializer::distanceGain(const SpatializationParams& voice, float distance) {
