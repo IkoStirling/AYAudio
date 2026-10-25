@@ -24,6 +24,9 @@ Default Client / Editor hosts install `AudioSubSystem` through
 so a host may select Miniaudio, Null, or a custom backend without bypassing the
 module graph. The default `-no-audio` option omits the module entirely; direct
 subsystem construction remains available to demos and tests.
+`AudioSubSystem::lifecycleSerial()` changes whenever its engine is initialized
+or shut down. Presentation adapters that retain clip IDs can compare it with
+their prepared value and reject stale IDs after device restart.
 
 ## Gallery
 

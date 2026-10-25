@@ -414,6 +414,7 @@ bool AudioSubSystem::initialize() {
         _engine.reset();
         return false;
     }
+    ++_lifecycleSerial;
 
     // Hosts that use ECS should call registerAudioEmitterSystem() after
     // World::initialize (e.g. from Application bootstrap). Auto-register
@@ -447,6 +448,7 @@ void AudioSubSystem::shutdown() {
     if (_engine) {
         _engine->shutdown();
         _engine.reset();
+        ++_lifecycleSerial;
     }
     // If we never handed the backend to the engine (e.g. initialize() failed
     // before that step), make sure it gets stopped and dropped here.

@@ -89,6 +89,9 @@ public:
 
     // Test/diagnostic accessor. nullptr until initialize() succeeds.
     AudioEngine* engine() { return _engine.get(); }
+    /// Changes after every successful device initialization and shutdown.
+    /// Optional presenters can reject clips prepared for an earlier engine.
+    std::uint64_t lifecycleSerial() const noexcept { return _lifecycleSerial; }
 
 private:
     struct StreamPump {
@@ -113,6 +116,7 @@ private:
     std::unique_ptr<IAudioBackend> _backend;
     ayt::game::SubSystemDescriptor _descriptor{};
     std::vector<StreamPump> _streamPumps;
+    std::uint64_t _lifecycleSerial = 0;
 
     static AudioSubSystem* s_instance;
 };

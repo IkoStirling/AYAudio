@@ -77,6 +77,21 @@ AudioSettings defaultSettings() {
 
 TEST_SUITE(AudioSubSystemBridgeTests)
 
+    TEST_CASE(LifecycleSerialRejectsReusedEngineState) {
+        AudioSubSystem sub;
+        const auto initial = sub.lifecycleSerial();
+        CHECK(sub.initialize());
+        const auto first = sub.lifecycleSerial();
+        CHECK(first != initial);
+        CHECK(sub.initialize());
+        CHECK(sub.lifecycleSerial() == first);
+        sub.shutdown();
+        CHECK(sub.lifecycleSerial() != first);
+        CHECK(sub.initialize());
+        CHECK(sub.lifecycleSerial() != first);
+        sub.shutdown();
+    }
+
     TEST_CASE(RegisterFrom16BitPcm) {
         AudioSubSystem sub;
         CHECK(sub.initialize());

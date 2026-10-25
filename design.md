@@ -402,6 +402,10 @@ public:
 ```
 
 **Shutdown order (with Editor):** stop all voices → close miniaudio device → then allow process teardown.  
+Each successful initialization and each shutdown of an owned engine advances
+`AudioSubSystem::lifecycleSerial`; idempotent initialize does not. Optional
+presenters use the serial to reject clip IDs from a previous engine instance,
+even when an allocator reuses the same address or clip number.
 Register **before** or **after** `RendererSubSystem` is acceptable; audio does not depend on bgfx.
 
 **Config** (`AYApplication`):
