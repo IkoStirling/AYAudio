@@ -158,6 +158,9 @@ struct AudioSettings {
 
     uint32_t commandQueueCapacity = 256;   // SPSC ring buffer size (power of 2)
     uint32_t maxVoices = 32;               // active voice cap
+    /// Reserved stream slots (1..64); default keeps the original eight.
+    /// Set with maxVoices for rooms with more concurrent speakers.
+    uint32_t maxStreams = 8;
     uint32_t maxClips  = 64;               // registered clip cap
 
     float masterGain = 1.0f;

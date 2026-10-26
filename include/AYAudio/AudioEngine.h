@@ -303,7 +303,8 @@ private:
     std::atomic<bool> _initialized{false};
     std::atomic<bool> _paused{false};
 
-    // v1.5: fixed 8-slot streaming pool. Each slot owns a ring buffer; the
+    // Fixed storage with an initialized 1..64-slot admission limit. Each live
+    // slot owns a ring buffer; the
     // game-thread producer writes via streamPush(); the audio-thread consumer
     // reads inside renderVoiceStream().
     struct StreamSlot {
@@ -311,7 +312,8 @@ private:
         std::unique_ptr<AudioStreamRingBuffer> ring;
         bool inUse = false;
     };
-    static constexpr uint32_t kMaxStreams = 8;
+    static constexpr uint32_t kMaxStreams = 64;
+    uint32_t _streamCapacity = 0;
     std::array<StreamSlot, kMaxStreams> _streams{};
 
     // Engine-wide pitch multiplier. Clamped to [0.25, 4.0] in setTimeScale.

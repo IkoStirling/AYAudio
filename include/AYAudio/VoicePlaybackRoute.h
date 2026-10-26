@@ -12,7 +12,7 @@ namespace ayt::audio {
 
 /// One remote speaker routed into AudioEngine's Voice bus and spatializer.
 /// The host owns AudioEngine and calls close before shutting that engine down.
-/// One route occupies one of the engine's current eight stream slots.
+/// One route occupies one of the engine's configured stream slots.
 class VoicePlaybackRoute {
 public:
     explicit VoicePlaybackRoute(std::uint64_t speakerId,

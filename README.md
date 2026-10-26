@@ -315,7 +315,9 @@ rejects duplicates/stale packets and emits a silence block for a missing
 For playback, `VoicePlaybackRoute` consumes decoded mono frames into one
 `AudioEngine` stream on the Voice bus, supports spatial settings and volume,
 and closes/reopens its stream on mute to prevent old queued speech resuming.
-Call `close(engine)` before engine shutdown. One route uses one of the current
-eight engine stream slots. PCM16 at 48 kHz mono costs about 96 kb/s plus
+Call `close(engine)` before engine shutdown. One route uses one stream slot;
+`AudioSettings::maxStreams` defaults to eight and may be set to 1..64 at
+initialization. Reserve enough `maxVoices` for simultaneously audible routes.
+PCM16 at 48 kHz mono costs about 96 kb/s plus
 transport overhead; production voice codecs, congestion control and account
 privacy policy remain host responsibilities.

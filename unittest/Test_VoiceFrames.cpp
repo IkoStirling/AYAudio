@@ -3,6 +3,7 @@
 #include <AYAudio/VoiceCapture.h>
 #include <AYAudio/VoicePlaybackRoute.h>
 #include <limits>
+#include <memory>
 
 using namespace ayt::audio;
 TEST_SUITE(VoiceFramesTests)
@@ -156,5 +157,37 @@ TEST_CASE(captured_block_survives_wire_jitter_and_null_backend_render) {
     route.close(engine);
     engine.shutdown();
     capture.stop();
+}
+TEST_CASE(configured_room_stream_budget_admits_twelve_independent_speakers) {
+    AudioEngine engine;
+    AudioSettings settings{};
+    settings.backend = AudioBackendKind::Null;
+    settings.maxVoices = 16;
+    settings.maxStreams = 12;
+    CHECK(engine.initialize(settings));
+    std::vector<std::unique_ptr<VoicePlaybackRoute>> speakers;
+    for (std::uint64_t id = 1; id <= 12; ++id) {
+        auto route = std::make_unique<VoicePlaybackRoute>(id, 1);
+        CHECK(route->open(engine));
+        CHECK(route->submit({id, 0, 48'000, 1,
+            std::vector<std::int16_t>(960, 2048)}));
+        CHECK_INT_EQ(route->pump(engine), VoicePopStatus::Frame);
+        speakers.push_back(std::move(route));
+    }
+    VoicePlaybackRoute extra(13, 1);
+    CHECK_FALSE(extra.open(engine));
+    engine.submitFrame(0.f);
+    float output[64]{};
+    engine.render(output, 32);
+    CHECK(output[0] > 0.0f);
+    CHECK(speakers[0]->setMuted(engine, true));
+    CHECK(extra.open(engine));
+    extra.close(engine);
+    for (auto& speaker : speakers) speaker->close(engine);
+    engine.shutdown();
+
+    AudioEngine invalid;
+    settings.maxStreams = 65;
+    CHECK_FALSE(invalid.initialize(settings));
 }
 TEST_SUITE_END

@@ -262,7 +262,9 @@ bool AudioEngine::initialize(const AudioSettings& settings) {
     if (_initialized) {
         return true;
     }
-    if (!settings.sampleRate || (settings.channels!=1 && settings.channels!=2) || !settings.maxVoices || settings.maxVoices>64) return false;
+    if (!settings.sampleRate || (settings.channels!=1 && settings.channels!=2) ||
+        !settings.maxVoices || settings.maxVoices>64 ||
+        !settings.maxStreams || settings.maxStreams>kMaxStreams) return false;
     _settings = settings;
 
     if (!_commands.initialize(settings.commandQueueCapacity)) {
@@ -287,6 +289,7 @@ bool AudioEngine::initialize(const AudioSettings& settings) {
     _voiceProcessors.assign(settings.maxVoices, AudioVoiceProcessor{});
     _hrtfProfile.reset();
     _voiceCapacity = settings.maxVoices;
+    _streamCapacity = settings.maxStreams;
     _lifecycleGeneration = ++gAudioLifecycle;
     _engineFrame = 0;
     _listener = ListenerParams{};
@@ -349,6 +352,7 @@ void AudioEngine::shutdown() {
     _voices.clear();
     _voiceProcessors.clear();_hrtfProfile.reset();
     _voiceCapacity = 0;
+    _streamCapacity = 0;
     _lifecycleGeneration = ++gAudioLifecycle;
 
     // Close any open streaming rings so producer threads (if any) see
@@ -789,18 +793,18 @@ AudioStreamId AudioEngine::openStream(const AudioStreamDesc& desc) {
         return InvalidStreamId;
     }
 
-    // Find the first free slot. fixed-size std::array keeps this lock-free
+    // Find the first free slot. Fixed storage avoids relocation
     // under game-thread-only mutation (audio thread is a reader through
     // streamRing() but only after the slot's inUse flag is published).
-    uint32_t chosenIdx = kMaxStreams;
-    for (uint32_t i = 0; i < kMaxStreams; ++i) {
+    uint32_t chosenIdx = _streamCapacity;
+    for (uint32_t i = 0; i < _streamCapacity; ++i) {
         if (!_streams[i].inUse) {
             chosenIdx = i;
             break;
         }
     }
-    if (chosenIdx == kMaxStreams) {
-        return InvalidStreamId; // all 8 slots busy
+    if (chosenIdx == _streamCapacity) {
+        return InvalidStreamId; // configured slots busy
     }
 
     StreamSlot& slot = _streams[chosenIdx];
@@ -832,7 +836,7 @@ void AudioEngine::closeStream(AudioStreamId id) {
         return;
     }
     const uint32_t idx = id - 1;
-    if (idx >= kMaxStreams) return;
+    if (idx >= _streamCapacity) return;
     StreamSlot& slot = _streams[idx];
     if (!slot.inUse) return;
 
@@ -862,7 +866,7 @@ uint32_t AudioEngine::streamPush(AudioStreamId id, const float* pcm, uint32_t fr
         return 0;
     }
     const uint32_t idx = id - 1;
-    if (idx >= kMaxStreams) return 0;
+    if (idx >= _streamCapacity) return 0;
     StreamSlot& slot = _streams[idx];
     if (!slot.inUse || !slot.ring) return 0;
     return slot.ring->write(pcm, frameCount);
@@ -874,7 +878,7 @@ void AudioEngine::markStreamEndOfStream(AudioStreamId id) {
         return;
     }
     const uint32_t idx = id - 1;
-    if (idx >= kMaxStreams) return;
+    if (idx >= _streamCapacity) return;
     StreamSlot& slot = _streams[idx];
     if (!slot.inUse || !slot.ring) return;
     slot.ring->markEndOfStream();
@@ -891,7 +895,7 @@ VoiceHandle AudioEngine::playStream(AudioStreamId stream,
     }
     if (stream == InvalidStreamId) return InvalidVoice;
     const uint32_t idx = stream - 1;
-    if (idx >= kMaxStreams) return InvalidVoice;
+    if (idx >= _streamCapacity) return InvalidVoice;
     StreamSlot& slot = _streams[idx];
     if (!slot.inUse || !slot.ring) return InvalidVoice;
 
@@ -984,7 +988,7 @@ AudioStreamRingBuffer* AudioEngine::streamRing(AudioStreamId id) {
     std::lock_guard<std::recursive_mutex> stateLock(_stateMutex);
     if (id == InvalidStreamId) return nullptr;
     const uint32_t idx = id - 1;
-    if (idx >= kMaxStreams) return nullptr;
+    if (idx >= _streamCapacity) return nullptr;
     StreamSlot& slot = _streams[idx];
     return slot.inUse ? slot.ring.get() : nullptr;
 }
@@ -994,7 +998,7 @@ const AudioStreamDesc& AudioEngine::streamDesc(AudioStreamId id) const {
     static const AudioStreamDesc kEmpty{};
     if (id == InvalidStreamId) return kEmpty;
     const uint32_t idx = id - 1;
-    if (idx >= kMaxStreams) return kEmpty;
+    if (idx >= _streamCapacity) return kEmpty;
     const StreamSlot& slot = _streams[idx];
     return slot.inUse ? slot.desc : kEmpty;
 }
@@ -1098,7 +1102,7 @@ void AudioEngine::render(float* output, uint32_t frameCount) {
         if (slot.sourceKind == VoiceSourceKind::Stream) {
             // Resolve the stream's ring buffer.
             const uint32_t sIdx = slot.stream - 1;
-            StreamSlot* sslot = (slot.stream != InvalidStreamId && sIdx < kMaxStreams)
+            StreamSlot* sslot = (slot.stream != InvalidStreamId && sIdx < _streamCapacity)
                                     ? &_streams[sIdx]
                                     : nullptr;
             if (sslot == nullptr || !sslot->inUse || !sslot->ring) {

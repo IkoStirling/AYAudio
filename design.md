@@ -878,7 +878,10 @@ silence block and re-primes after starvation. Sequence comparisons are modulo
 `VoicePlaybackRoute` attaches a mono queue to an existing AudioEngine stream,
 using its Voice bus and spatialization. It requires source rate equal to the
 engine rate, checks stream capacity before pop, and recreates the stream when
-unmuted so pre-mute PCM cannot leak. The eight-stream AudioEngine cap limits
-simultaneous routes. No AYNetwork dependency or service policy is embedded;
+unmuted so pre-mute PCM cannot leak. `AudioSettings::maxStreams` now selects
+1..64 usable slots from fixed storage at initialization (default eight);
+streams and active voices retain separate budgets. The owner thread allocates
+ring buffers only for opened streams, while the audio callback sees fixed slot
+addresses. No AYNetwork dependency or service policy is embedded;
 the host handles transport, authenticated identity, rate changes, resampling,
 codec negotiation, room moderation and connection cleanup.
