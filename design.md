@@ -893,3 +893,14 @@ jitter queues, then opens newly selected routes. A shared stream shortage
 returns Partial with a count of unavailable selected speakers; active routes
 remain usable. The host supplies candidate policy/positions and closes all
 routes before AudioEngine shutdown.
+
+`VoicePacketIngress` is a room-owner boundary for reference PCM16 packets.
+The host maps a connection to a trusted speaker ID and monotonic milliseconds;
+the ingress refuses unopened speakers before decoding. For audible speakers,
+the per-ID bucket has 1..16 burst frames and 1..100 refill frames/s, with
+integer millitokens and a capped elapsed interval. Invalid wire and claimed-ID
+mismatch consume a token, so malformed traffic cannot bypass the local rate
+budget. State is limited to 64 audible IDs and pruned when routes close.
+Accepted decoded frames pass to the existing jitter queue; its format/sequence
+checks remain authoritative. This does not authenticate a socket or provide
+network-level protection against traffic that never reaches the audio owner.

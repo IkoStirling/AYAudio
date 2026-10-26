@@ -3,6 +3,7 @@
 #include <AYAudio/VoiceCapture.h>
 #include <AYAudio/VoicePlaybackRoute.h>
 #include <AYAudio/VoiceRoomRouter.h>
+#include <AYAudio/VoicePacketIngress.h>
 #include <array>
 #include <limits>
 #include <memory>
@@ -235,6 +236,52 @@ TEST_CASE(room_router_virtualizes_distant_speakers_without_old_audio_backlog) {
     CHECK(room.audible(2) && room.audible(3));
     room.closeAll(engine);
     CHECK_INT_EQ(room.activeCount(), 0);
+    engine.shutdown();
+}
+TEST_CASE(authenticated_voice_ingress_limits_packets_and_discards_inactive_routes) {
+    AudioEngine engine;
+    AudioSettings settings{};
+    settings.backend = AudioBackendKind::Null;
+    settings.maxStreams = 2;
+    CHECK(engine.initialize(settings));
+    VoiceRoomRouter room(1, 1);
+    VoiceRoomCandidate speaker;
+    speaker.speakerId = 7;
+    CHECK_INT_EQ(room.update(engine, std::span<const VoiceRoomCandidate>(&speaker, 1)).active, 1);
+    VoicePacketIngress ingress(2, 50);
+    std::vector<float> samples(960, 0.25f);
+    std::vector<std::uint8_t> wire, wrong;
+    CHECK(VoicePcmWire::encode(7, 0, 48'000, 1, samples.data(), 960, wire));
+    CHECK(VoicePcmWire::encode(8, 0, 48'000, 1, samples.data(), 960, wrong));
+    CHECK_INT_EQ(ingress.accept(room, 7, wrong, 100),
+                 VoiceIngressStatus::IdentityMismatch);
+    CHECK_INT_EQ(ingress.accept(room, 7, wire, 100),
+                 VoiceIngressStatus::Accepted);
+    CHECK_INT_EQ(ingress.accept(room, 7, wire, 100),
+                 VoiceIngressStatus::RateLimited);
+    CHECK_INT_EQ(ingress.accept(room, 7, wire, 99),
+                 VoiceIngressStatus::Invalid);
+    CHECK(VoicePcmWire::encode(7, 1, 48'000, 1, samples.data(), 960, wire));
+    CHECK_INT_EQ(ingress.accept(room, 7, wire, 120),
+                 VoiceIngressStatus::Accepted);
+    CHECK_INT_EQ(ingress.trackedSpeakers(), 1);
+    room.pump(engine);
+    engine.submitFrame(0.f);
+    float output[64]{};
+    engine.render(output, 32);
+    CHECK(output[0] > 0.01f);
+    auto malformed = wire;
+    malformed[4] = 2;
+    CHECK_INT_EQ(ingress.accept(room, 7, malformed, 140),
+                 VoiceIngressStatus::Invalid);
+    CHECK_INT_EQ(ingress.accept(room, 7, wire, 140),
+                 VoiceIngressStatus::RateLimited);
+    speaker.muted = true;
+    CHECK_INT_EQ(room.update(engine, std::span<const VoiceRoomCandidate>(&speaker, 1)).active, 0);
+    CHECK_INT_EQ(ingress.accept(room, 7, wire, 160),
+                 VoiceIngressStatus::Inaudible);
+    CHECK_INT_EQ(ingress.trackedSpeakers(), 0);
+    room.closeAll(engine);
     engine.shutdown();
 }
 TEST_SUITE_END
