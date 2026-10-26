@@ -885,3 +885,11 @@ ring buffers only for opened streams, while the audio callback sees fixed slot
 addresses. No AYNetwork dependency or service policy is embedded;
 the host handles transport, authenticated identity, rate changes, resampling,
 codec negotiation, room moderation and connection cleanup.
+
+`VoiceRoomRouter` builds a bounded candidate ranking before mutating active
+routes. Priority descends, distance ascends, then stable speaker ID ascends;
+muted speakers are omitted. The router closes evicted routes, dropping their
+jitter queues, then opens newly selected routes. A shared stream shortage
+returns Partial with a count of unavailable selected speakers; active routes
+remain usable. The host supplies candidate policy/positions and closes all
+routes before AudioEngine shutdown.

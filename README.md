@@ -321,3 +321,8 @@ initialization. Reserve enough `maxVoices` for simultaneously audible routes.
 PCM16 at 48 kHz mono costs about 96 kb/s plus
 transport overhead; production voice codecs, congestion control and account
 privacy policy remain host responsibilities.
+
+`VoiceRoomRouter` 可在每个房间更新中按游戏提供的优先级、距离和稳定说话人 ID
+选择最多 64 位可听说话人；未入选者不占流槽、不积压语音，重新入选时重新
+预缓冲。选人规则不替游戏判断权限或空间位置；在关闭 AudioEngine 前调用
+`closeAll`。

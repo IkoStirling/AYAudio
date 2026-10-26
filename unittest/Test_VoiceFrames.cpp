@@ -2,6 +2,8 @@
 #include <AYAudio/VoiceFrames.h>
 #include <AYAudio/VoiceCapture.h>
 #include <AYAudio/VoicePlaybackRoute.h>
+#include <AYAudio/VoiceRoomRouter.h>
+#include <array>
 #include <limits>
 #include <memory>
 
@@ -189,5 +191,50 @@ TEST_CASE(configured_room_stream_budget_admits_twelve_independent_speakers) {
     AudioEngine invalid;
     settings.maxStreams = 65;
     CHECK_FALSE(invalid.initialize(settings));
+}
+TEST_CASE(room_router_virtualizes_distant_speakers_without_old_audio_backlog) {
+    AudioEngine engine;
+    AudioSettings settings{};
+    settings.backend = AudioBackendKind::Null;
+    settings.maxStreams = 2;
+    settings.maxVoices = 4;
+    CHECK(engine.initialize(settings));
+    VoiceRoomRouter room(2, 1);
+    const auto candidate = [](std::uint64_t id, std::int32_t priority,
+                              float distance, bool muted = false) {
+        VoiceRoomCandidate value;
+        value.speakerId = id; value.priority = priority;
+        value.distanceMeters = distance; value.muted = muted;
+        return value;
+    };
+    const std::array first{candidate(1, 0, 1), candidate(2, 0, 2),
+                           candidate(3, 1, 100), candidate(4, 10, 0, true)};
+    const auto entered = room.update(engine, first);
+    CHECK_INT_EQ(entered.status, VoiceRoomUpdateStatus::Ok);
+    CHECK_INT_EQ(entered.active, 2);
+    CHECK(room.audible(1) && room.audible(3));
+    CHECK_FALSE(room.audible(2) || room.audible(4));
+    CHECK_FALSE(room.submit({2, 0, 48'000, 1,
+        std::vector<std::int16_t>(960, 2048)}));
+    CHECK(room.submit({1, 0, 48'000, 1,
+        std::vector<std::int16_t>(960, 2048)}));
+    room.pump(engine);
+    const std::array changed{candidate(1, 0, 1), candidate(2, 2, 2),
+                             candidate(3, 1, 100)};
+    const auto switched = room.update(engine, changed);
+    CHECK_INT_EQ(switched.status, VoiceRoomUpdateStatus::Ok);
+    CHECK(room.audible(2) && room.audible(3));
+    CHECK_FALSE(room.audible(1));
+    CHECK_FALSE(room.submit({1, 1, 48'000, 1,
+        std::vector<std::int16_t>(960, 2048)}));
+    CHECK(room.submit({2, 0, 48'000, 1,
+        std::vector<std::int16_t>(960, 2048)}));
+    const std::array invalid{candidate(2, 0, 1), candidate(2, 1, 2)};
+    CHECK_INT_EQ(room.update(engine, invalid).status,
+        VoiceRoomUpdateStatus::Invalid);
+    CHECK(room.audible(2) && room.audible(3));
+    room.closeAll(engine);
+    CHECK_INT_EQ(room.activeCount(), 0);
+    engine.shutdown();
 }
 TEST_SUITE_END
