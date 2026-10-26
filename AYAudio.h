@@ -14,6 +14,9 @@
 #include <AYAudio/AudioSpatializer.h>
 #include <AYAudio/AudioClipRegistry.h>
 #include <AYAudio/AudioEngine.h>
+#include <AYAudio/VoiceFrames.h>
+#include <AYAudio/VoiceCapture.h>
+#include <AYAudio/VoicePlaybackRoute.h>
 #include <AYAudio/AudioRecorder.h>
 #include <AYAudio/SampleInstrument.h>
 #include <AYAudio/AudioComponents.h>

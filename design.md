@@ -860,3 +860,25 @@ hosts built. Reports: out/audio-completion-20261016/{audio-accepted,
 authoring-accepted,editor-accepted}.json. No physical MIDI keyboard or manual GUI
 acceptance is claimed. The device fixture was corrected to warm output before
 capture; Workbench subtracts recorded pre-roll before correlating its probe.
+
+## Live voice boundaries (2026-10-26)
+
+`VoiceCapture` owns a miniaudio capture device and an SPSC PCM ring; callbacks
+perform only bounded writes and increment dropped-frame count. The owner polls
+complete 20 ms blocks. Mute prevents new writes and discards the old ring
+before unmuting; device teardown joins callbacks before ring destruction.
+`VoicePcmWire` is a strict little-endian version 1 PCM16 reference format,
+accepting 8/16/24/48 kHz and 1/2 channels with exact 20 ms payload length.
+It does not perform encryption or sender authentication. `VoiceJitterQueue`
+holds one authenticated speaker and one format, primes by a bounded number of
+frames, rejects stale/duplicate/far-ahead sequences, conceals a gap with a
+silence block and re-primes after starvation. Sequence comparisons are modulo
+32 bits within the 64-frame window.
+
+`VoicePlaybackRoute` attaches a mono queue to an existing AudioEngine stream,
+using its Voice bus and spatialization. It requires source rate equal to the
+engine rate, checks stream capacity before pop, and recreates the stream when
+unmuted so pre-mute PCM cannot leak. The eight-stream AudioEngine cap limits
+simultaneous routes. No AYNetwork dependency or service policy is embedded;
+the host handles transport, authenticated identity, rate changes, resampling,
+codec negotiation, room moderation and connection cleanup.

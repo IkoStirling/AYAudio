@@ -18,6 +18,7 @@ add_executable(${TEST_TARGET}
     Test_AudioLatencyDevice.cpp
     Test_AudioEngine.cpp
     Test_AudioRecorder.cpp
+    Test_VoiceFrames.cpp
     Test_ChartDocument.cpp
     Test_Performance.cpp
     Test_SampleInstrument.cpp

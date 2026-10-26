@@ -300,3 +300,22 @@ capture; Workbench subtracts recorded pre-roll before correlating its probe.
 Desktop hosts may link `AYAudioPlayback` without ECS, resources or GameLoop.
 See [playback](playback/README.md) for dependencies, mono stereo direction, queued
 speech underflow behavior and focused tests. The full AYAudio target reuses it.
+
+## Live voice frame path (2026-10-26)
+
+`VoiceCapture` captures 20 ms mono/stereo PCM blocks into a bounded callback
+ring without retaining a long take. The owner thread calls `pollFrame`, then
+uses `VoicePcmWire::encode` or a replaceable compressed codec. `VoicePcmWire`
+provides a bounded versioned PCM16 reference packet with speaker ID, sequence,
+sample rate and exact payload length; the network host authenticates the
+speaker and transports it. `VoiceJitterQueue` reorders up to 64 frames,
+rejects duplicates/stale packets and emits a silence block for a missing
+20 ms frame. Local mute drops queued capture/receive data.
+
+For playback, `VoicePlaybackRoute` consumes decoded mono frames into one
+`AudioEngine` stream on the Voice bus, supports spatial settings and volume,
+and closes/reopens its stream on mute to prevent old queued speech resuming.
+Call `close(engine)` before engine shutdown. One route uses one of the current
+eight engine stream slots. PCM16 at 48 kHz mono costs about 96 kb/s plus
+transport overhead; production voice codecs, congestion control and account
+privacy policy remain host responsibilities.

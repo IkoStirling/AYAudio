@@ -11,6 +11,7 @@ add_subdirectory(playback)
 set(SRC_FILES
     src/AYAudioComponents.cpp
     src/AYAudioRecorder.cpp
+    src/AYVoiceCapture.cpp
     src/AYAudioSampleInstrument.cpp
     src/AYAudioEmitterSystem.cpp
     src/AYAudioContentPlayer.cpp
@@ -42,6 +43,9 @@ set(HEAD_FILES
     include/AYAudio/AudioEngine.h
     include/AYAudio/OutputDiagnostics.h
     include/AYAudio/AudioRecorder.h
+    include/AYAudio/VoiceFrames.h
+    include/AYAudio/VoiceCapture.h
+    include/AYAudio/VoicePlaybackRoute.h
     include/AYAudio/SampleInstrument.h
     include/AYAudio/AudioEmitterSystem.h
     include/AYAudio/AudioMixer.h
